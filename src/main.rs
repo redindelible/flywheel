@@ -5,6 +5,7 @@ mod keymap;
 mod codegen;
 
 
+#[allow(unused)]
 fn as_hex_string(s: &[u8]) -> String {
     let mut str = String::with_capacity(s.len() * 2);
     for c in s {
@@ -17,12 +18,18 @@ fn as_hex_string(s: &[u8]) -> String {
 fn main() {
     let mut code = CodeBuilder::new();
     let entry = code.add_block();
+    let exit = code.add_block();
 
     code.build(entry, |builder| {
         let mut builder = X64Writer::new(builder);
 
         builder.mov_r64_r64(Reg::RAX, Reg::RCX);
-        builder.ret()
+        builder.jump(exit);
+    });
+    code.build(exit, |builder| {
+        let mut builder = X64Writer::new(builder);
+
+        builder.ret();
     });
 
     let mem = code.finish(|size| memmap2::MmapMut::map_anon(size).unwrap(), |mem| mem);

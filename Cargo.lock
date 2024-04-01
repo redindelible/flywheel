@@ -7,6 +7,7 @@ name = "flywheel"
 version = "0.1.0"
 dependencies = [
  "memmap2",
+ "static_assertions",
 ]
 
 [[package]]
@@ -23,3 +24,9 @@ checksum = "fe751422e4a8caa417e13c3ea66452215d7d63e19e604f4980461212f3ae1322"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"

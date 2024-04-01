@@ -1,4 +1,5 @@
 use crate::codegen::Block;
+use crate::codegen::code_builder::BlockKey;
 
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -47,7 +48,7 @@ fn rex(w: bool, r: bool, x: bool, b: bool) -> u8 {
 
 #[inline(always)]
 fn modrm_direct(r: impl Into<u8>, rm: Reg) -> u8 {
-    0b11000000 | ((r.into() & 0b111) << 3) | (rm as u8 & 0b111)
+    0b11000000 | ((r.into() & 0b111) << 3) | rm.lower()
 }
 
 
@@ -66,6 +67,13 @@ impl<'a> X64Writer<'a> {
             0x8B,
             modrm_direct(dst, src)
         ]);
+    }
+
+    pub fn jump(&mut self, dst: BlockKey) {
+        self.block.write([
+            0xE9
+        ]);
+        self.block.write_relocation_i32(dst, -4);
     }
 
     pub fn ret(&mut self) {
