@@ -24,7 +24,6 @@ pub trait Asm {
 struct Fixup<F> {
     block_offset: usize,
     block: BlockKey,
-    // offset: i8,
     data: F,
     enforce_size: u8
 }
@@ -62,13 +61,13 @@ impl<A: Asm> Block<A> {
     }
 }
 
-pub struct CodeBuilder<W> where W: Asm {
-    blocks: KeyMap<BlockKey, Block<W>>,
-    _phantom: PhantomData<W>
+pub struct CodeBuilder<A> where A: Asm {
+    blocks: KeyMap<BlockKey, Block<A>>,
+    _phantom: PhantomData<A>
 }
 
-impl<W> CodeBuilder<W> where W: Asm {
-    pub fn new() -> CodeBuilder<W> {
+impl<A> CodeBuilder<A> where A: Asm {
+    pub fn new() -> CodeBuilder<A> {
         CodeBuilder { blocks: KeyMap::new(), _phantom: PhantomData }
     }
 
@@ -76,12 +75,12 @@ impl<W> CodeBuilder<W> where W: Asm {
         self.blocks.reserve()
     }
 
-    pub fn build<O>(&mut self, block: BlockKey, f: impl for<'a> FnOnce(&mut W::Writer<'a>) -> O) -> O {
+    pub fn build<O>(&mut self, block: BlockKey, f: impl for<'a> FnOnce(&mut A::Writer<'a>) -> O) -> O {
         if !self.blocks.is_initialized(block) {
             self.blocks.insert(block, Block::new());
         }
 
-        let mut writer = W::new_writer(&mut self.blocks[block]);
+        let mut writer = A::new_writer(&mut self.blocks[block]);
         f(&mut writer)
     }
 
@@ -105,8 +104,8 @@ impl<W> CodeBuilder<W> where W: Asm {
                 let fixup_start = start + fixup.block_offset;
                 let fixup_offset = block_positions_estimate[&fixup.block] as i64 - fixup_start as i64;
 
-                let enforced_size = W::fix_size_estimate(fixup_offset as isize, &fixup.data);
-                saved += W::fix_pessimistic_size(&fixup.data) - enforced_size;
+                let enforced_size = A::fix_size_estimate(fixup_offset as isize, &fixup.data);
+                saved += A::fix_pessimistic_size(&fixup.data) - enforced_size;
                 fixup.enforce_size = enforced_size;
             }
             block_positions.insert(block_key, actual_size);
@@ -123,7 +122,7 @@ impl<W> CodeBuilder<W> where W: Asm {
             for (range, fixup) in block.ranges.iter().zip(&block.fixups) {
                 offset += range.len();
                 let _ = mem.write(&block.machine_code[range.clone()]);
-                W::fix(block_positions[&fixup.block] as isize - offset as isize, fixup.enforce_size, &fixup.data, &mut mem);
+                A::fix(block_positions[&fixup.block] as isize - offset as isize, fixup.enforce_size, &fixup.data, &mut mem);
                 offset += fixup.enforce_size as usize;
             }
             let _ = mem.write(&block.machine_code[block.recent.clone()]);

@@ -174,4 +174,32 @@ mod test {
             let _ = code.finish(|size| vec![0; size], |mem| mem);
         }
     }
+
+    #[test]
+    fn test_sized_backward_jumps() {
+        for len in 0..=256 {
+            let mut code: CodeBuilder<X64> = CodeBuilder::new();
+            let entry = code.add_block();
+            let stuff = code.add_block();
+            let back = code.add_block();
+            let exit = code.add_block();
+
+            code.build(entry, |builder| {
+                // builder.mov_r64_r64(Reg::RAX, Reg::RCX);
+                builder.jump(back);
+            });
+            code.build(stuff, |builder| {
+                builder.nops(len);
+                builder.jump(exit);
+            });
+            code.build(back, |builder| {
+                builder.jump(stuff);
+            });
+            code.build(exit, |builder| {
+                builder.ret();
+            });
+
+            let _ = code.finish(|size| vec![0; size], |mem| mem);
+        }
+    }
 }
