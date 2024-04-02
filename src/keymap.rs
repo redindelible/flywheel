@@ -84,6 +84,12 @@ impl<K: KeyMapKey, T> KeyMap<K, T> {
             .filter_map(|(index, item)| item.as_ref().map(|item| (K::from(KeyData(index)), item)))
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item=(K, &mut T)> {
+        self.items.iter_mut()
+            .enumerate()
+            .filter_map(|(index, item)| item.as_mut().map(|item| (K::from(KeyData(index)), item)))
+    }
+
     // pub fn map<O>(self, mut f: impl FnMut(K, T) -> O) -> KeyMap<K, O> {
     //     let mut new_items = IndexMap::with_capacity(self.items.len());
     //     for (key, value) in self.items {

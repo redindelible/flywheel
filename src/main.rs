@@ -1,5 +1,5 @@
 use crate::codegen::CodeBuilder;
-use crate::codegen::x64::{Reg, X64Writer};
+use crate::codegen::x64::{Reg, X64};
 
 mod keymap;
 mod codegen;
@@ -16,19 +16,20 @@ fn as_hex_string(s: &[u8]) -> String {
 
 
 fn main() {
-    let mut code = CodeBuilder::new();
+    let mut code: CodeBuilder<X64> = CodeBuilder::new();
     let entry = code.add_block();
+    let stuff = code.add_block();
     let exit = code.add_block();
 
     code.build(entry, |builder| {
-        let mut builder = X64Writer::new(builder);
-
         builder.mov_r64_r64(Reg::RAX, Reg::RCX);
         builder.jump(exit);
     });
+    code.build(stuff, |builder| {
+        // builder.mov_r64_r64(Reg::RAX, Reg::RCX);
+        // builder.jump(entry);
+    });
     code.build(exit, |builder| {
-        let mut builder = X64Writer::new(builder);
-
         builder.ret();
     });
 
