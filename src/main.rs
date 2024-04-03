@@ -22,7 +22,8 @@ fn main() {
     let exit = code.add_block();
 
     code.build(entry, |builder| {
-        builder.mov_r64_rm64(Reg::RAX, Addressing::SIB { base: Some(Reg::RSP), scale: Scale::X1, index: Reg::RAX, disp: i8::MIN as i32 });
+        builder.mov_r64_rm64(Reg::RAX, Addressing::IndirectReg(Reg::RCX));
+        builder.mov_rm64_r64(Addressing::IndirectReg(Reg::RCX), Reg::RDX);
         builder.jump(exit);
     });
     code.build(stuff, |builder| {
@@ -37,10 +38,12 @@ fn main() {
     dbg!(as_hex_string(&mem));
     let exec = mem.make_exec().unwrap();
     let ptr = exec.as_ptr();
+
+    let mut ret = 0;
     let num = unsafe {
-        let f: unsafe extern "C" fn (i32) -> i32 = std::mem::transmute(ptr);
-        f(4)
+        let f: unsafe extern "C" fn (*mut i32, i32) -> i32 = std::mem::transmute(ptr);
+        f(&mut ret as *mut i32, 5);
     };
 
-    println!("{:?}", num);
+    println!("{:?}", ret);
 }
