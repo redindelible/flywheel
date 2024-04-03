@@ -47,8 +47,13 @@ fn rex(w: bool, r: bool, x: bool, b: bool) -> u8 {
 }
 
 #[inline(always)]
-fn modrm_direct(r: impl Into<u8>, rm: Reg) -> u8 {
-    0b11000000 | ((r.into() & 0b111) << 3) | rm.lower()
+fn modrm(mod_: u8, reg: impl Into<u8>, rm: impl Into<u8>) -> u8 {
+    ((mod_ & 0b11) << 6) | ((reg.into() & 0b111) << 3) | (rm.into() & 0b111)
+}
+
+#[inline(always)]
+fn sib(scale: impl Into<u8>, index: impl Into<u8>, base: impl Into<u8>) -> u8 {
+    ((scale.into() & 0b11) << 6) | ((index.into() & 0b111) << 3) | (base.into() & 0b111)
 }
 
 
@@ -111,13 +116,151 @@ pub struct X64Writer<'a> {
     block: &'a mut Block<X64>
 }
 
+#[repr(u8)]
+pub enum Scale {
+    X1 = 0,
+    X2 = 1,
+    X3 = 2,
+    X4 = 3
+}
+
+impl From<Scale> for u8 {
+    fn from(value: Scale) -> Self { value as u8 }
+}
+
+pub enum Addressing {
+    Direct(Reg),
+    IndirectReg(Reg),
+    SIB {
+        base: Option<Reg>,
+        scale: Scale,
+        index: Reg,
+        disp: i32
+    },
+}
+
 impl<'a> X64Writer<'a> {
     pub fn mov_r64_r64(&mut self, dst: Reg, src: Reg) {
         self.block.write([
             rex(true, dst.ext() == 1, false, src.ext() == 1),
             0x8B,
-            modrm_direct(dst, src)
+            modrm(0x11, dst, src)
         ]);
+    }
+
+    #[inline]
+    pub fn mov_r64_rm64(&mut self, dst: Reg, src: Addressing) {
+        match src {
+            Addressing::Direct(src) => {
+                self.block.write([
+                    rex(true, dst.ext() == 1, false, src.ext() == 1),
+                    0x8B,
+                    modrm(0b11, dst, src)
+                ]);
+            }
+            Addressing::IndirectReg(src) => {
+                if src.lower() == 0b101 {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, false, src.ext() == 1),
+                        0x8B,
+                        modrm(0b01, dst, 0b101),
+                        0x00
+                    ]);
+                } else if src.lower() == 0b100 {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, false, src.ext() == 1),
+                        0x8B,
+                        modrm(0b00, dst, 0b100),
+                        sib(0b00, 0b100, 0b100)
+                    ]);
+                } else {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, false, src.ext() == 1),
+                        0x8B,
+                        modrm(0b00, dst, src)
+                    ]);
+                }
+            }
+            Addressing::SIB { base: Option::None, scale: Scale::X1, index: src, disp } => {
+                if let Ok(disp) = i8::try_from(disp) {
+                    if src.lower() == 0b100 {
+                        self.block.write([
+                            rex(true, dst.ext() == 1, false, src.ext() == 1),
+                            0x8B,
+                            modrm(0b01, dst, 0b100),
+                            sib(0b00, 0b100, 0b100)
+                        ]);
+                        self.block.write(disp.to_le_bytes());
+                    } else {
+                        self.block.write([
+                            rex(true, dst.ext() == 1, false, src.ext() == 1),
+                            0x8B,
+                            modrm(0b01, dst, src)
+                        ]);
+                        self.block.write(disp.to_le_bytes());
+                    }
+                } else {
+                    if src.lower() == 0b100 {
+                        self.block.write([
+                            rex(true, dst.ext() == 1, false, src.ext() == 1),
+                            0x8B,
+                            modrm(0b10, dst, 0b100),
+                            sib(0b00, 0b100, 0b100)
+                        ]);
+                        self.block.write(disp.to_le_bytes());
+                    } else {
+                        self.block.write([
+                            rex(true, dst.ext() == 1, false, src.ext() == 1),
+                            0x8B,
+                            modrm(0b10, dst, src)
+                        ]);
+                        self.block.write(disp.to_le_bytes());
+                    }
+                }
+            }
+            Addressing::SIB { base: Option::None, scale, index: src, disp } => {
+                if src == Reg::RSP {
+                    panic!("Not supported in x64");
+                } else {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, src.ext() == 1, false),
+                        0x8B,
+                        modrm(0b00, dst, 0b100),
+                        sib(scale, src.lower(), 0b101)
+                    ]);
+                    self.block.write(disp.to_le_bytes());
+                }
+            }
+            Addressing::SIB { base: Some(base), scale, index: src, disp } => {
+                if src.lower() == 0b100 {
+                    panic!("Not supported in x64");
+                }
+                if disp == 0 && base.lower() != 0b101 {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        0x8B,
+                        modrm(0b00, dst, 0b100),
+                        sib(scale, src.lower(), base.lower())
+                    ]);
+                } else if let Ok(disp) = i8::try_from(disp) {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        0x8B,
+                        modrm(0b01, dst, 0b100),
+                        sib(scale, src.lower(), base.lower())
+                    ]);
+                    self.block.write(disp.to_le_bytes());
+                } else {
+                    self.block.write([
+                        rex(true, dst.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        0x8B,
+                        modrm(0b10, dst, 0b100),
+                        sib(scale, src.lower(), base.lower())
+                    ]);
+                    self.block.write(disp.to_le_bytes());
+                }
+            }
+        }
     }
 
     pub fn nops(&mut self, mut num: usize) {

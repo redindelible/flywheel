@@ -1,5 +1,5 @@
 use crate::codegen::CodeBuilder;
-use crate::codegen::x64::{Reg, X64};
+use crate::codegen::x64::{Addressing, Reg, Scale, X64};
 
 mod keymap;
 mod codegen;
@@ -22,7 +22,7 @@ fn main() {
     let exit = code.add_block();
 
     code.build(entry, |builder| {
-        builder.mov_r64_r64(Reg::RAX, Reg::RCX);
+        builder.mov_r64_rm64(Reg::RAX, Addressing::SIB { base: Some(Reg::RSP), scale: Scale::X1, index: Reg::RAX, disp: i8::MIN as i32 });
         builder.jump(exit);
     });
     code.build(stuff, |builder| {
