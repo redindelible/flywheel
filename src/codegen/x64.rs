@@ -143,11 +143,12 @@ pub enum Addressing {
 
 impl Addressing {
     #[inline]
-    fn generate<A: Asm>(&self, instruction: u8, reg: Reg, block: &mut Block<A>) {
+    fn generate<A: Asm>(&self, instruction: u8, reg: impl Into<u8>, block: &mut Block<A>) {
+        let reg = reg.into();
         match *self {
             Addressing::Direct(src) => {
                 block.write([
-                    rex(true, reg.ext() == 1, false, src.ext() == 1),
+                    rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                     instruction,
                     modrm(0b11, reg, src)
                 ]);
@@ -155,21 +156,21 @@ impl Addressing {
             Addressing::IndirectReg(src) => {
                 if src.lower() == 0b101 {
                     block.write([
-                        rex(true, reg.ext() == 1, false, src.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                         instruction,
                         modrm(0b01, reg, 0b101),
                         0x00
                     ]);
                 } else if src.lower() == 0b100 {
                     block.write([
-                        rex(true, reg.ext() == 1, false, src.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                         instruction,
                         modrm(0b00, reg, 0b100),
                         sib(0b00, 0b100, 0b100)
                     ]);
                 } else {
                     block.write([
-                        rex(true, reg.ext() == 1, false, src.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                         instruction,
                         modrm(0b00, reg, src)
                     ]);
@@ -179,7 +180,7 @@ impl Addressing {
                 if let Ok(disp) = i8::try_from(disp) {
                     if src.lower() == 0b100 {
                         block.write([
-                            rex(true, reg.ext() == 1, false, src.ext() == 1),
+                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                             instruction,
                             modrm(0b01, reg, 0b100),
                             sib(0b00, 0b100, 0b100)
@@ -187,7 +188,7 @@ impl Addressing {
                         block.write(disp.to_le_bytes());
                     } else {
                         block.write([
-                            rex(true, reg.ext() == 1, false, src.ext() == 1),
+                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                             instruction,
                             modrm(0b01, reg, src)
                         ]);
@@ -196,7 +197,7 @@ impl Addressing {
                 } else {
                     if src.lower() == 0b100 {
                         block.write([
-                            rex(true, reg.ext() == 1, false, src.ext() == 1),
+                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                             instruction,
                             modrm(0b10, reg, 0b100),
                             sib(0b00, 0b100, 0b100)
@@ -204,7 +205,7 @@ impl Addressing {
                         block.write(disp.to_le_bytes());
                     } else {
                         block.write([
-                            rex(true, reg.ext() == 1, false, src.ext() == 1),
+                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
                             instruction,
                             modrm(0b10, reg, src)
                         ]);
@@ -217,7 +218,7 @@ impl Addressing {
                     panic!("Not supported in x64");
                 } else {
                     block.write([
-                        rex(true, reg.ext() == 1, src.ext() == 1, false),
+                        rex(true, reg & 0b1000 != 0, src.ext() == 1, false),
                         instruction,
                         modrm(0b00, reg, 0b100),
                         sib(scale, src.lower(), 0b101)
@@ -231,14 +232,14 @@ impl Addressing {
                 }
                 if disp == 0 && base.lower() != 0b101 {
                     block.write([
-                        rex(true, reg.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, src.ext() == 1, base.ext() == 1),
                         instruction,
                         modrm(0b00, reg, 0b100),
                         sib(scale, src.lower(), base.lower())
                     ]);
                 } else if let Ok(disp) = i8::try_from(disp) {
                     block.write([
-                        rex(true, reg.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, src.ext() == 1, base.ext() == 1),
                         instruction,
                         modrm(0b01, reg, 0b100),
                         sib(scale, src.lower(), base.lower())
@@ -246,7 +247,7 @@ impl Addressing {
                     block.write(disp.to_le_bytes());
                 } else {
                     block.write([
-                        rex(true, reg.ext() == 1, src.ext() == 1, base.ext() == 1),
+                        rex(true, reg & 0b1000 != 0, src.ext() == 1, base.ext() == 1),
                         instruction,
                         modrm(0b10, reg, 0b100),
                         sib(scale, src.lower(), base.lower())
@@ -273,6 +274,27 @@ impl<'a> X64Writer<'a> {
     pub fn lea_r64_rm64(&mut self, dst: Reg, src: Addressing) {
         debug_assert!(!matches!(&src, Addressing::Direct(_)));
         src.generate(0x8D, dst, self.block);
+    }
+
+    #[inline]
+    pub fn add_rm64_imm32(&mut self, dst: Addressing, imm: i32) {
+        if let Ok(imm) = i8::try_from(imm) {
+            dst.generate(0x83, 0b0000, self.block);
+            self.block.write(imm.to_le_bytes());
+        } else {
+            dst.generate(0x81, 0b0000, self.block);
+            self.block.write(imm.to_le_bytes());
+        }
+    }
+
+    #[inline]
+    pub fn add_rm64_r64(&mut self, dst: Addressing, src: Reg) {
+        dst.generate(0x01, src, self.block);
+    }
+
+    #[inline]
+    pub fn add_r64_rm64(&mut self, dst: Reg, src: Addressing) {
+        src.generate(0x03, dst, self.block);
     }
 
     pub fn nops(&mut self, mut num: usize) {

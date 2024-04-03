@@ -1,5 +1,5 @@
 use crate::codegen::CodeBuilder;
-use crate::codegen::x64::{Addressing, Reg, Scale, X64};
+use crate::codegen::x64::{Addressing, Reg, X64};
 
 mod keymap;
 mod codegen;
@@ -22,8 +22,8 @@ fn main() {
     let exit = code.add_block();
 
     code.build(entry, |builder| {
-        builder.mov_r64_rm64(Reg::RAX, Addressing::IndirectReg(Reg::RCX));
-        builder.mov_rm64_r64(Addressing::IndirectReg(Reg::RCX), Reg::RDX);
+        // builder.add_rm64_imm32(Addressing::SIB { base: None, scale: Scale::X1, index: Reg::RCX, disp: 4 }, 20);
+        builder.add_r64_rm64(Reg::RAX, Addressing::IndirectReg(Reg::RCX));
         builder.jump(exit);
     });
     code.build(stuff, |builder| {
@@ -39,8 +39,8 @@ fn main() {
     let exec = mem.make_exec().unwrap();
     let ptr = exec.as_ptr();
 
-    let mut ret = 0;
-    let num = unsafe {
+    let mut ret = [5; 2];
+    let _ = unsafe {
         let f: unsafe extern "C" fn (*mut i32, i32) -> i32 = std::mem::transmute(ptr);
         f(&mut ret as *mut i32, 5);
     };
