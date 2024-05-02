@@ -84,7 +84,7 @@ impl<A> CodeBuilder<A> where A: Asm {
         f(&mut writer)
     }
 
-    pub fn finish<M>(mut self, alloc_mem: impl FnOnce(usize) -> M, get_mut: impl FnOnce(&mut M) -> &mut [u8]) -> M {
+    pub fn finish<M: AsMut<[u8]>>(mut self, alloc_mem: impl FnOnce(usize) -> M) -> M {
         use std::io::Write;
 
         let mut block_positions_estimate: HashMap<BlockKey, usize> = HashMap::new();
@@ -114,7 +114,7 @@ impl<A> CodeBuilder<A> where A: Asm {
         debug_assert!(actual_size <= total_size_estimate);
 
         let mut mem_holder = alloc_mem(actual_size);
-        let mut mem = get_mut(&mut mem_holder);
+        let mut mem = mem_holder.as_mut();
         let mut offset = 0;
         debug_assert!(mem.len() >= actual_size);
 

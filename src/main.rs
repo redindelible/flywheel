@@ -34,7 +34,7 @@ fn main() {
         builder.ret();
     });
 
-    let mem = code.finish(|size| memmap2::MmapMut::map_anon(size).unwrap(), |mem| mem);
+    let mem = code.finish(|size| memmap2::MmapMut::map_anon(size).unwrap());
     dbg!(as_hex_string(&mem));
     let exec = mem.make_exec().unwrap();
     let ptr = exec.as_ptr();

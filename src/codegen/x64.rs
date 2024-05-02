@@ -327,7 +327,7 @@ impl<'a> X64Writer<'a> {
 #[cfg(test)]
 mod test {
     use crate::codegen::CodeBuilder;
-    use crate::codegen::x64::{Reg, X64};
+    use crate::codegen::x64::{Addressing, Reg, X64};
 
     #[test]
     fn test_sized_forward_jumps() {
@@ -338,7 +338,7 @@ mod test {
             let exit = code.add_block();
 
             code.build(entry, |builder| {
-                builder.mov_r64_r64(Reg::RAX, Reg::RCX);
+                builder.mov_r64_rm64(Reg::RAX, Addressing::Direct(Reg::RCX));
                 builder.jump(exit);
             });
             code.build(stuff, |builder| {
@@ -348,7 +348,7 @@ mod test {
                 builder.ret();
             });
 
-            let _ = code.finish(|size| vec![0; size], |mem| mem);
+            let _ = code.finish(|size| vec![0; size]);
         }
     }
 
@@ -376,7 +376,7 @@ mod test {
                 builder.ret();
             });
 
-            let _ = code.finish(|size| vec![0; size], |mem| mem);
+            let _ = code.finish(|size| vec![0; size]);
         }
     }
 }
