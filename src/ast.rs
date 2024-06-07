@@ -1,5 +1,12 @@
 
 
+pub enum Stmt {
+    If(Box<Expr>, Vec<Stmt>, Vec<Stmt>),
+    Return(Box<Expr>),
+    Expr(Box<Expr>)
+}
+
+
 pub enum UnaryOp {
     Not,
     Neg
@@ -23,5 +30,5 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
-    Call(Box<str>, Box<[Expr]>),
+    Call(Box<Expr>, Box<[Expr]>),
 }

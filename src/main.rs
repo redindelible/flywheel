@@ -1,6 +1,6 @@
 use crate::codegen::CodeBuilder;
 use crate::codegen::x64::{Addressing, Reg, X64};
-use crate::parser::lex;
+use crate::parser::{lex, Parser};
 
 mod keymap;
 mod codegen;
@@ -55,6 +55,6 @@ if b:
     return 4
 else:
     return val
-        ");
-    dbg!(tokens);
+        ").unwrap();
+    dbg!(Parser::from_tokens(tokens).parse_stmt());
 }

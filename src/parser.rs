@@ -1,18 +1,31 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::error::Error;
+use std::fmt::{Debug, Formatter};
+use crate::ast;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TokenType {
+    EOF,
     Indent,
     Dedent,
+    Newline,
     Integer,
     Ident,
     If,
     Else,
+    Def,
     Return,
+    Period,
+    Comma,
+    Plus,
+    Minus,
+    LeftParen,
+    RightParen,
     Colon
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Token<'a>(TokenType, &'a str);
 
 
@@ -49,7 +62,7 @@ impl<'a> StrExt<'a> for &'a str {
 }
 
 
-pub fn lex(mut s: &str) -> Vec<Token> {
+pub fn lex(mut s: &str) -> Result<Vec<Token>, String> {
     let mut brackets = 0;
     let mut indent_levels = vec![0];
     let mut tokens: Vec<Token> = vec![];
@@ -82,7 +95,7 @@ pub fn lex(mut s: &str) -> Vec<Token> {
                         tokens.push(Token(TokenType::Dedent, ""));
                     }
                 } else {
-                    panic!("No matching indent level")
+                    return Err(String::from("No matching indent level"));
                 }
             }
             Ordering::Greater => {
@@ -104,27 +117,230 @@ pub fn lex(mut s: &str) -> Vec<Token> {
                         "if" => TokenType::If,
                         "return" => TokenType::Return,
                         "else" => TokenType::Else,
+                        "def" => TokenType::Def,
                         _ => TokenType::Ident
                     };
                     tokens.push(Token(ty, ident));
                 }
                 ':' => tokens.push(Token(TokenType::Colon, s.advance_chars(1))),
+                ',' => tokens.push(Token(TokenType::Comma, s.advance_chars(1))),
+                '+' => tokens.push(Token(TokenType::Plus, s.advance_chars(1))),
+                '-' => tokens.push(Token(TokenType::Minus, s.advance_chars(1))),
+                '(' => {
+                    brackets += 1;
+                    tokens.push(Token(TokenType::LeftParen, s.advance_chars(1)))
+                },
+                ')' => {
+                    brackets -= 1;
+                    tokens.push(Token(TokenType::RightParen, s.advance_chars(1)))
+                },
                 ' ' | '\t' | '\r' => {
                     s.advance_chars(1);
                 }
                 '\n' => {
-                    s.advance_chars(1);
-                    break;
+                    if brackets == 0 {
+                        tokens.push(Token(TokenType::Newline, s.advance_chars(1)));
+                        break;
+                    } else {
+                        s.advance_chars(1);
+                    }
                 }
                 c => {
-                    println!("Unknown character: {c}");
-                    s.advance_chars(1);
+                    return Err(format!("Unexpected character: {c}"));
                 }
             }
         }
     }
 
-    return tokens;
+    return Ok(tokens);
+}
+
+pub struct ParseError(Cow<'static, str>);
+
+impl From<String> for ParseError {
+    fn from(value: String) -> Self {
+        ParseError(Cow::from(value))
+    }
+}
+
+impl From<&'static str> for ParseError {
+    fn from(value: &'static str) -> Self {
+        ParseError(Cow::from(value))
+    }
+}
+
+impl Debug for ParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Parse Error: {}", self.0.as_ref())
+    }
+}
+
+
+pub type ParseResult<T> = Result<T, ParseError>;
+
+pub struct Parser<'a> {
+    tokens: Vec<Token<'a>>,
+    idx: usize
+}
+
+impl<'a> Parser<'a> {
+    pub fn from_text(text: &'a str) -> Result<Parser<'a>, String> {
+        Ok(Parser::from_tokens(lex(text)?))
+    }
+
+    pub fn from_tokens(tokens: Vec<Token<'a>>) -> Parser<'a> {
+        Parser { tokens, idx: 0 }
+    }
+
+    fn curr(&self) -> Token<'a> {
+        self.tokens.get(self.idx).copied().unwrap_or(Token(TokenType::EOF, ""))
+    }
+
+    fn advance(&mut self) -> Token<'a> {
+        let ret = self.curr();
+        self.idx += 1;
+        ret
+    }
+
+    fn expect(&mut self, ty: TokenType) -> ParseResult<Token<'a>> {
+        let curr = self.curr();
+        if curr.0 == ty {
+            self.advance();
+            Ok(curr)
+        } else {
+            Err(format!("Expected a {ty} token").into())
+        }
+    }
+
+    pub fn parse_stmt(&mut self) -> ParseResult<ast::Stmt> {
+        match self.curr() {
+            Token(TokenType::If, _) => {
+                self.advance();
+                let cond = self.parse_expr()?;
+                self.expect(TokenType::Newline)?; self.expect(TokenType::Indent)?;
+                let mut then_stmts = Vec::new();
+                while self.curr().0 != TokenType::Dedent {
+                    let stmt = self.parse_stmt()?;
+                    self.expect(TokenType::Newline)?;
+                    then_stmts.push(stmt);
+                }
+                self.expect(TokenType::Dedent)?; self.expect(TokenType::Else)?;
+
+                self.expect(TokenType::Newline)?; self.expect(TokenType::Indent)?;
+                let mut else_stmts = Vec::new();
+                while self.curr().0 != TokenType::Dedent {
+                    let stmt = self.parse_stmt()?;
+                    self.expect(TokenType::Newline)?;
+                    else_stmts.push(stmt);
+                }
+                self.expect(TokenType::Dedent)?;
+
+                Ok(ast::Stmt::If(Box::new(cond), then_stmts, else_stmts))
+            }
+            Token(TokenType::Return, _) => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.expect(TokenType::Newline)?;
+
+                Ok(ast::Stmt::Return(Box::new(expr)))
+            }
+            _ => {
+                let expr = self.parse_expr()?;
+                self.expect(TokenType::Newline)?;
+
+                Ok(ast::Stmt::Expr(Box::new(expr)))
+            }
+        }
+    }
+
+    pub fn parse_expr(&mut self) -> ParseResult<ast::Expr> {
+        self.parse_expr_add()
+    }
+
+    fn parse_expr_add(&mut self) -> ParseResult<ast::Expr> {
+        let mut left = self.parse_expr_mul()?;
+        loop {
+            match self.curr() {
+                Token(TokenType::Plus, _) => {
+                    self.advance();
+                    left = ast::Expr::Binary(ast::BinaryOp::Add, Box::new(left), Box::new(self.parse_expr_mul()?));
+                }
+                Token(TokenType::Minus, _) => {
+                    self.advance();
+                    left = ast::Expr::Binary(ast::BinaryOp::Sub, Box::new(left), Box::new(self.parse_expr_mul()?));
+                }
+                _ => break
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_expr_mul(&mut self) -> ParseResult<ast::Expr> {
+        let left = self.parse_expr_call()?;
+        loop {
+            match self {
+                _ => break
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_expr_call(&mut self) -> ParseResult<ast::Expr> {
+        let mut left = self.parse_expr_terminal()?;
+        loop {
+            match self.curr() {
+                Token(TokenType::Period, _) => {
+                    self.advance();
+                    let attr = self.expect(TokenType::Ident)?.1;
+                    left = ast::Expr::Attr(Box::new(left), Box::from(attr));
+                }
+                Token(TokenType::LeftParen, _) => {
+                    self.advance();
+                    let mut arguments = Vec::new();
+                    while self.curr().0 != TokenType::RightParen {
+                        arguments.push(self.parse_expr()?);
+                        if self.curr().0 == TokenType::Comma {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(TokenType::RightParen)?;
+
+                    left = ast::Expr::Call(Box::new(left), arguments.into_boxed_slice());
+                }
+                _ => break
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_expr_terminal(&mut self) -> ParseResult<ast::Expr> {
+        match self.curr() {
+            Token(TokenType::Ident, name) => {
+                self.advance();
+                Ok(ast::Expr::Name(Box::from(name)))
+            }
+            Token(TokenType::Integer, num) => {
+                self.advance();
+                let num = num.parse::<i64>().map_err(|err| err.to_string().into())?;
+                Ok(ast::Expr::Integer(num))
+            }
+            // Token(TokenType::, num) => {
+            //     self.advance();
+            //     let num = num.parse::<i64>().map_err(|err| err.to_string().into())?;
+            //     Ok(ast::Expr::Integer(num))
+            // }
+            // Token(TokenType::Integer, num) => {
+            //     self.advance();
+            //     let num = num.parse::<i64>().map_err(|err| err.to_string().into())?;
+            //     Ok(ast::Expr::Integer(num))
+            // }
+            Token(other, _) => {
+                Err(ParseError::from(format!("Unexpected token: {other}")))
+            }
+        }
+    }
 }
 
 
