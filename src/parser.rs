@@ -208,7 +208,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(curr)
         } else {
-            Err(format!("Expected a {ty} token").into())
+            Err(format!("Expected a {ty:?} token").into())
         }
     }
 
@@ -323,7 +323,7 @@ impl<'a> Parser<'a> {
             }
             Token(TokenType::Integer, num) => {
                 self.advance();
-                let num = num.parse::<i64>().map_err(|err| err.to_string().into())?;
+                let num = num.parse::<i64>().map_err(|err| ParseError(err.to_string().into()))?;
                 Ok(ast::Expr::Integer(num))
             }
             // Token(TokenType::, num) => {
@@ -337,7 +337,7 @@ impl<'a> Parser<'a> {
             //     Ok(ast::Expr::Integer(num))
             // }
             Token(other, _) => {
-                Err(ParseError::from(format!("Unexpected token: {other}")))
+                Err(ParseError::from(format!("Unexpected token: {other:?}")))
             }
         }
     }
