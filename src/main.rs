@@ -1,21 +1,24 @@
-use crate::codegen::CodeBuilder;
-use crate::codegen::x64::{Addressing, Reg, X64};
-use crate::parser::{lex, Parser};
+use std::time::Instant;
+use crate::frontend::FrontendDriver;
 
-mod keymap;
 mod codegen;
-mod ast;
-mod parser;
-mod bytecode;
 mod interpreter;
-
+mod utils;
+mod frontend;
 
 fn main() {
-//     let tokens = lex(r"
-// if b:
-//     return 4
-// else:
-//     return val
-//         ").unwrap();
-//     dbg!(Parser::from_tokens(tokens).parse_stmt());
+    let mut frontend = FrontendDriver::new();
+    let source = frontend.add_string_source(r"
+fn main() -> u32 {
+    return 7;
+}
+", "<text>".into());
+    
+    let start = Instant::now();
+    let maybe_ast = frontend.parse_source(source.id());
+    match maybe_ast {
+        Ok(_) => (),
+        Err(e) => { dbg!(e); }
+    }
+    dbg!(start.elapsed());
 }

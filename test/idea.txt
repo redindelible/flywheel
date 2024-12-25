@@ -1,0 +1,29 @@
+
+struct Person {
+    name: String,
+    age: i32
+}
+
+
+scripting! {
+    trait Filterer {
+        fn filter_people(people: &Person) -> bool;
+    }
+}
+
+trait ScriptFunction {
+    type Arguments;
+    type Return;
+}
+
+struct Filterer {
+    filter_people: FilterPeopleFunction
+}
+
+struct FilterPeopleFunction;
+
+let engine = Engine::new();
+
+let filterer_code = engine.load_module::<Filterer>("path/to/script").unwrap();
+// modules can't be sync since the language isn't thread safe, per-se
+engine.execute(&mut filterer_code.filter_people, )

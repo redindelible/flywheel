@@ -4,7 +4,7 @@ use std::{iter, mem};
 use std::marker::PhantomData;
 use std::ops::Range;
 // use std::rc::Rc;
-use crate::keymap::{declare_key_type, KeyMap};
+use crate::utils::keymap::{declare_key_type, ReservableKeyMap};
 
 declare_key_type! {
     pub struct BlockKey;
@@ -18,7 +18,7 @@ pub trait Asm {
 
     fn fix_pessimistic_size(data: &Self::Fixup) -> u8;
     fn fix_size_estimate(offset_estimate: isize, data: &Self::Fixup) -> u8;
-    fn fix<'m>(raw_offset: isize, size: u8, data: &Self::Fixup, mem: &mut &'m mut [u8]);
+    fn fix(raw_offset: isize, size: u8, data: &Self::Fixup, mem: &mut &mut [u8]);
 }
 
 struct Fixup<F> {
@@ -62,13 +62,13 @@ impl<A: Asm> Block<A> {
 }
 
 pub struct CodeBuilder<A> where A: Asm {
-    blocks: KeyMap<BlockKey, Block<A>>,
+    blocks: ReservableKeyMap<BlockKey, Block<A>>,
     _phantom: PhantomData<A>
 }
 
 impl<A> CodeBuilder<A> where A: Asm {
     pub fn new() -> CodeBuilder<A> {
-        CodeBuilder { blocks: KeyMap::new(), _phantom: PhantomData }
+        CodeBuilder { blocks: ReservableKeyMap::new(), _phantom: PhantomData }
     }
 
     pub fn add_block(&mut self) -> BlockKey {

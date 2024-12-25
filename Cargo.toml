@@ -3,8 +3,15 @@ name = "flywheel"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+#[profile.release]
+#debug = 1
 
 [dependencies]
-memmap2 = { version = "0.9.4" }
-static_assertions = { version = "1.1.0" }
+num_enum = "0.7.3"
+string-interner = "0.18.0"
+regex-automata = "0.4.9"
+bumpalo = "3.16.0"
+
+#[dependencies.regex-automata]
+#default-features = false
+#features = ["std", "perf", "unicode", "syntax", ]

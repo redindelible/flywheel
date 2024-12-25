@@ -194,23 +194,21 @@ impl Addressing {
                         ]);
                         block.write(disp.to_le_bytes());
                     }
+                } else if src.lower() == 0b100 {
+                    block.write([
+                        rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
+                        instruction,
+                        modrm(0b10, reg, 0b100),
+                        sib(0b00, 0b100, 0b100)
+                    ]);
+                    block.write(disp.to_le_bytes());
                 } else {
-                    if src.lower() == 0b100 {
-                        block.write([
-                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
-                            instruction,
-                            modrm(0b10, reg, 0b100),
-                            sib(0b00, 0b100, 0b100)
-                        ]);
-                        block.write(disp.to_le_bytes());
-                    } else {
-                        block.write([
-                            rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
-                            instruction,
-                            modrm(0b10, reg, src)
-                        ]);
-                        block.write(disp.to_le_bytes());
-                    }
+                    block.write([
+                        rex(true, reg & 0b1000 != 0, false, src.ext() == 1),
+                        instruction,
+                        modrm(0b10, reg, src)
+                    ]);
+                    block.write(disp.to_le_bytes());
                 }
             }
             Addressing::SIB { base: Option::None, scale, index: src, disp } => {

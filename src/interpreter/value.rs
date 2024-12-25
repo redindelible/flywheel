@@ -1,7 +1,6 @@
-use std::hint::unreachable_unchecked;
-use std::num::NonZeroU64;
+use std::mem;
 use std::ptr::NonNull;
-use crate::interpreter::gc::GCRef;
+use crate::interpreter::gc::GcRef;
 
 /// Stores a number of different types of values in a space efficient representation.
 ///
@@ -52,71 +51,72 @@ use crate::interpreter::gc::GCRef;
 /// to interpret the 48 remaining payload bits. For example, a tag of 001 denotes a signed 32 bit
 /// integer, and a tag of 010 denotes an unsigned 32 bit integer.
 #[derive(Copy, Clone, Debug, Default)]
-struct Value(u64);
+pub struct Value(u64);
 
-enum UnwrappedValue {
+pub enum UnwrappedValue {
     None,
     Float(f64),
-    Pointer(GCRef),
-    SignedInteger(i32),
-    UnsignedInteger(u32)
+    Pointer(GcRef),
+    Integer(i32),
+    // SignedInteger(i32),
+    // UnsignedInteger(u32)
 }
 
+// const CANONICAL_NAN: f64 = f64::from_bits(0x7FF8000000000000);
+const CANONICAL_NAN: f64 = unsafe { mem::transmute(0x7FF8000000000000u64) };
+
 impl Value {
-    fn new_none() -> Value {
+    pub fn new_none() -> Value {
         Value(0)
     }
 
-    // fn from_u64(num: NonZeroU64) -> Value {
-    //     Value(num)
-    // }
-
-    fn from_float(num: f64) -> Value {
-        let num = if num.is_nan() {
-            f64::from_bits(0x7FF8000000000000)
-        } else {
-            num
-        };
-        Value(unsafe { !num.to_bits() })
+    pub fn from_float(mut num: f64) -> Value {
+        if num.is_nan() {
+            num = CANONICAL_NAN;
+        }
+        Value(!num.to_bits())
     }
 
-    fn from_gc(ptr: GCRef) -> Value {
-        let numeric = ptr.addr().get() as u64;
+    pub fn from_gc(ptr: GcRef) -> Value {
+        let numeric = ptr.as_ptr().as_ptr() as u64;
         assert_eq!(numeric >> 51, 0);
         assert_eq!(numeric & 0b111, 0);
         assert_ne!(numeric, 0);
         Value(numeric)
     }
 
-    fn from_i32(num: i32) -> Value {
+    pub fn from_i32(num: i32) -> Value {
         Value(((num as u32 as u64) << 3) | 0b001)
     }
 
-    fn from_u32(num: i32) -> Value {
-        Value(((num as u32 as u64) << 3) | 0b010)
-    }
+    // pub fn from_u32(num: u32) -> Value {
+    //     Value(((num as u64) << 3) | 0b010)
+    // }
 
-    fn unwrap(&self) -> UnwrappedValue {
+    pub fn unwrap(&self) -> UnwrappedValue {
         let numeric = self.0;
         if numeric >> 51 == 0 {
             match numeric & 0b111 {
                 0 => {
                     if let Some(ptr) = NonNull::new(numeric as *mut ()) {
-                        UnwrappedValue::Pointer(GCRef::from_pointer(ptr))
+                        UnwrappedValue::Pointer(GcRef::from_ptr(ptr))
                     } else {
                         UnwrappedValue::None
                     }
                 }
                 1 => {
-                    UnwrappedValue::SignedInteger((numeric >> 3) as i32)
+                    UnwrappedValue::Integer((numeric >> 3) as i32)
                 }
-                2 => {
-                    UnwrappedValue::UnsignedInteger((numeric >> 3) as u32)
-                }
+                // 1 => {
+                //     UnwrappedValue::SignedInteger((numeric >> 3) as i32)
+                // }
+                // 2 => {
+                //     UnwrappedValue::UnsignedInteger((numeric >> 3) as u32)
+                // }
                 3..=7 => {
                     todo!()
                 }
-                _ => unsafe { unreachable_unchecked() }
+                _ => unreachable!()
             }
         } else {
             UnwrappedValue::Float(f64::from_bits(!numeric))

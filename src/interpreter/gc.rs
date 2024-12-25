@@ -1,171 +1,260 @@
-use std::cell::Cell;
 use std::collections::HashMap;
-use std::num::NonZeroUsize;
 use std::ptr::NonNull;
 
-pub struct GC {
-    all: Option<GCRef>,
-    gray: Option<GCRef>,
-    sweep: *mut Option<GCRef>,
-    step: GCStep
-}
-
-enum GCStep {
-    Wait,
-    Mark,
-    Sweep
-}
-
-struct GCHeader {
-    next_gc: Option<GCRef>,
-    next_list: Option<GCRef>,
-    mark: Cell<u8>,
-    ty: Cell<GCObjectType>
-}
-
-#[repr(u8)]
 #[derive(Copy, Clone)]
-enum GCObjectType {
+pub struct GcRef(NonNull<GcHeader>);
+
+impl GcRef {
+    pub(crate) fn as_ptr(&self) -> NonNull<()> {
+        self.0.cast()
+    }
+
+    pub(crate) fn from_ptr(ptr: NonNull<()>) -> GcRef {
+        GcRef(ptr.cast())
+    }
+
+    unsafe fn as_mut<'a>(self) -> &'a mut GcHeader {
+        &mut *self.0.as_ptr()
+    }
+
+    unsafe fn downcast<'a>(self) -> DowncastObject<'a> {
+        match self.as_mut().ty {
+            GcType::Dictionary => {
+                DowncastObject::Dictionary(self.0.cast::<GcDictionaryObject>().as_mut())
+            }
+        }
+    }
+}
+
+enum DowncastObject<'a> {
+    Dictionary(&'a mut GcDictionaryObject)
+}
+
+struct GcHeader {
+    mark: u8,
+    ty: GcType,
+    prev: Option<GcRef>,
+    next: Option<GcRef>,
+}
+
+struct ObjectLinkedList {
+    first: Option<GcRef>,
+    last: Option<GcRef>,
+}
+
+impl ObjectLinkedList {
+    fn is_empty(&self) -> bool {
+        if self.first.is_none() {
+            assert!(self.last.is_none());
+            true
+        } else {
+            false
+        }
+    }
+
+    fn empty() -> Self {
+        ObjectLinkedList {
+            first: None,
+            last: None
+        }
+    }
+
+    unsafe fn pop_front(&mut self) -> Option<GcRef> {
+        if let Some(first_ref) = self.first {
+            self.remove(first_ref);
+            Some(first_ref)
+        } else {
+            debug_assert!(self.last.is_none());
+            None
+        }
+    }
+
+    unsafe fn push_front(&mut self, element: GcRef) {
+        if let Some(first) = self.first {
+            first.as_mut().prev = Some(element);
+            element.as_mut().next = Some(first);
+            element.as_mut().prev = None;
+        } else {
+            self.first = Some(element);
+            self.last = Some(element);
+            element.as_mut().prev = None;
+            element.as_mut().next = None;
+        }
+    }
+
+    unsafe fn remove(&mut self, element: GcRef) {
+        let element = &mut *element.0.as_ptr();
+        if let Some(prev) = element.prev {
+            prev.as_mut().next = element.next;
+        } else {
+            self.first = element.next;
+        }
+        if let Some(next) = element.next {
+            next.as_mut().prev = element.prev;
+        } else {
+            self.last = element.prev;
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(u8)]
+enum GcType {
     Dictionary = 0
 }
 
-enum GCObjectPtr {
-    Dictionary(NonNull<GCDictionaryObject>)
-}
-
-enum GCObjectRef<'a> {
-    Dictionary(&'a GCDictionaryObject)
-}
-
 #[repr(C)]
-struct GCDictionaryObject {
-    header: GCHeader,
-    items: HashMap<String, GCRef>
+pub struct GcDictionaryObject {
+    header: GcHeader,
+    items: HashMap<String, GcRef>
 }
 
-#[derive(Copy, Clone)]
-pub struct GCRef(pub(crate) NonNull<GCHeader>);
-
-#[derive(Copy, Clone)]
-pub struct GCDictionaryRef(NonNull<GCDictionaryObject>);
-
-impl GCDictionaryRef {
-    fn as_gcref(&self) -> GCRef {
-        GCRef(self.0.cast())
-    }
+enum ColorSet {
+    Flip,
+    Flop
 }
 
-
-impl GCRef {
-    pub fn addr(&self) -> NonZeroUsize {
-        unsafe { NonZeroUsize::new_unchecked(self.0.as_ptr() as usize) }
-    }
-
-    pub fn from_pointer(pointer: NonNull<()>) -> Self {
-        GCRef(pointer.cast())
-    }
-
-    pub unsafe fn get_mark(&self) -> u8 {
-        self.0.as_ref().mark.get()
-    }
-
-    pub unsafe fn set_mark(&self, value: u8) {
-        self.0.as_ref().mark.set(value)
-    }
-
-    pub unsafe fn ty(&self) -> GCObjectType {
-        self.0.as_ref().ty.get()
-    }
-}
-
-impl GC {
-    unsafe fn downcast_ptr(&self, gc_ref: GCRef) -> GCObjectPtr {
-        match gc_ref.ty() {
-            GCObjectType::Dictionary => GCObjectPtr::Dictionary(gc_ref.0.cast::<GCDictionaryObject>())
-        }
-    }
-
-    unsafe fn downcast_ref(&self, gc_ref: GCRef) -> GCObjectRef {
-        match gc_ref.ty() {
-            GCObjectType::Dictionary => GCObjectRef::Dictionary(unsafe { gc_ref.0.cast::<GCDictionaryObject>().as_ref() })
-        }
-    }
-
-    pub fn allocate_dictionary(&mut self) -> GCDictionaryRef {
-        let pointer = GCDictionaryRef(Box::leak(Box::new(GCDictionaryObject {
-            header: GCHeader {
-                next_gc: self.all,
-                next_list: None,
-                mark: Cell::new(self.current_white()),
-                ty: Cell::new(GCObjectType::Dictionary)
-            },
-            items: HashMap::new()
-        })).into());
-        self.all = Some(pointer.as_gcref());
-        unsafe { self.mark(pointer.as_gcref()) };
-        pointer
-    }
-
+impl ColorSet {
     fn current_white(&self) -> u8 {
-        0
+        match self {
+            ColorSet::Flip => 0,
+            ColorSet::Flop => 2
+        }
     }
 
     fn current_gray(&self) -> u8 {
         1
     }
 
-    unsafe fn mark(&mut self, mut gc_ref: GCRef) {
-        if gc_ref.get_mark() == self.current_white() {
-            gc_ref.set_mark(self.current_gray());
-            gc_ref.0.as_mut().next_list = self.gray;
-            self.gray = Some(gc_ref);
+    fn current_black(&self) -> u8 {
+        match self {
+            ColorSet::Flip => 2,
+            ColorSet::Flop => 0
         }
     }
 
-    unsafe fn propagate(&mut self, next_gray: GCRef) {
-        match self.downcast_ptr(next_gray) {
-            GCObjectPtr::Dictionary(as_dict) => {
-                for gc_ref in as_dict.as_ref().items.values() {
-                    self.mark(*gc_ref);
+    fn toggle(&mut self) {
+        match self {
+            ColorSet::Flip => *self = ColorSet::Flop,
+            ColorSet::Flop => *self = ColorSet::Flip,
+        }
+    }
+}
+
+pub struct Gc(GcInner);
+
+enum GcInner {
+    Wait {
+        all: ObjectLinkedList,
+        color_set: ColorSet
+    },
+    Mark {
+        white: ObjectLinkedList,
+        gray: ObjectLinkedList,
+        black: ObjectLinkedList,
+        color_set: ColorSet
+    },
+    Sweep {
+        dead: ObjectLinkedList,
+        alive: ObjectLinkedList,
+        color_set: ColorSet
+    },
+    Invalid
+}
+
+impl GcInner {
+    fn allocate_dictionary(&mut self) -> (&mut GcDictionaryObject, GcRef) {
+        let object = Box::leak(Box::new(GcDictionaryObject {
+            header: GcHeader {
+                mark: self.new_object_color(),
+                ty: GcType::Dictionary,
+                prev: None,
+                next: None,
+            },
+            items: HashMap::new()
+        }));
+        let object_ref = GcRef::from_ptr(NonNull::new(object).unwrap().cast());
+
+        unsafe {
+            match self {
+                GcInner::Wait { all, .. } => all.push_front(object_ref),
+                GcInner::Mark { gray, .. } => gray.push_front(object_ref),
+                GcInner::Sweep { alive, .. } => alive.push_front(object_ref),
+                GcInner::Invalid => unreachable!()
+            }
+        }
+
+        (object, object_ref)
+    }
+
+    fn new_object_color(&self) -> u8 {
+        match self {
+            GcInner::Wait { color_set, .. } => color_set.current_black(),
+            GcInner::Mark { color_set, .. } => color_set.current_gray(),
+            GcInner::Sweep { color_set, .. } => color_set.current_black(),
+            GcInner::Invalid => unreachable!()
+        }
+    }
+
+    fn step_once(&mut self, start_cycle: bool) {
+        match self {
+            GcInner::Wait { .. } => {
+                if start_cycle {
+                    let GcInner::Wait { all, mut color_set } = std::mem::replace(self, GcInner::Invalid) else { unreachable!() };
+                    color_set.toggle();
+                    *self = GcInner::Mark {
+                        white: all,
+                        gray: todo!(),
+                        black: ObjectLinkedList::empty(),
+                        color_set
+                    };
                 }
             }
-        }
-    }
-
-    unsafe fn sweep(&mut self, object: GCRef) {
-        match self.downcast_ptr(object) {
-            GCObjectPtr::Dictionary(as_dict) => {
-                drop(Box::from_raw(as_dict.as_ptr()));
-            }
-        }
-    }
-
-    pub fn step_once(&mut self) {
-        match self.step {
-            GCStep::Wait => {
-
-            }
-            GCStep::Mark => {
-                if let Some(mut next_gray) = self.gray {
-                    self.gray = unsafe { next_gray.0.as_mut() }.next_list.take();
-                    unsafe { self.propagate(next_gray) };
-                } else {
-                    self.sweep = &mut self.all;
-                    self.step = GCStep::Sweep;
-                }
-            }
-            GCStep::Sweep => {
-                if let Some(to_sweep) = unsafe { &mut *self.sweep } {
-                    if unsafe { to_sweep.get_mark() } == self.current_white() {
-                        unsafe { *self.sweep = to_sweep.0.as_ref().next_gc };
-                        unsafe { self.sweep(*to_sweep) };
+            GcInner::Mark { white, gray, black, color_set } => unsafe {
+                while let Some(mut next_object) = gray.pop_front() {
+                    let mark = next_object.as_mut().mark;
+                    if mark == color_set.current_white() {
+                        unreachable!();
+                    } else if mark == color_set.current_gray() {
+                        match next_object.downcast() {
+                            DowncastObject::Dictionary(object) => {
+                                for item in object.items.values() {
+                                    if item.as_mut().mark == color_set.current_white() {
+                                        item.as_mut().mark = color_set.current_gray();
+                                        white.remove(*item);
+                                        gray.push_front(*item);
+                                    }
+                                }
+                            }
+                        }
+                        next_object.as_mut().mark = color_set.current_black();
+                        black.push_front(next_object);
+                    } else if mark == color_set.current_black() {
+                        // do nothing
                     } else {
-                        self.sweep = unsafe { &mut to_sweep.0.as_mut().next_gc };
+                        unreachable!()
+                    }
+                }
+
+                let GcInner::Mark { white, gray, black, color_set } = std::mem::replace(self, GcInner::Invalid) else { unreachable!() };
+                assert!(gray.is_empty());
+                *self = GcInner::Sweep { alive: black, dead: white, color_set };
+            }
+            GcInner::Sweep { alive: _, dead, color_set: _ } => unsafe {
+                if let Some(object) = dead.pop_front() {
+                    match object.downcast() {
+                        DowncastObject::Dictionary(object) => {
+                            let object = Box::from_raw(object);
+                            drop(object);
+                        }
                     }
                 } else {
-                    self.step = GCStep::Wait;
+                    let GcInner::Sweep { alive, dead, color_set } = std::mem::replace(self, GcInner::Invalid) else { unreachable!() };
+                    assert!(dead.is_empty());
+                    *self = GcInner::Wait { all: alive, color_set };
                 }
             }
+            GcInner::Invalid => unreachable!()
         }
     }
 }
