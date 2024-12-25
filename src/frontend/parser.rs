@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use crate::frontend::{ast::{AST, ASTBuilder, AstRef, BinaryOp, Block, Expr, File, Function, Stmt, TopLevel, Type}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
+use crate::frontend::{ast::{self, AST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
 use crate::frontend::source::Source;
 
 pub fn parse(context: Arc<StringsTable>, source_arc: Arc<Source>) -> ParseResult<Arc<AST>> {
@@ -87,25 +87,25 @@ impl<'p, 'ast> Parser<'p, 'ast> {
         }
     }
     
-    fn parse_file(&mut self) -> ParseResult<AstRef<File>> {
+    fn parse_file(&mut self) -> ParseResult<AstRef<ast::File>> {
         let mut top_levels = vec![];
         while !self.curr_is_ty(TokenType::EOF) {
             top_levels.push(self.parse_top_level()?);
         }
         let top_levels = self.ast.new_list(top_levels);
-        let file = self.ast.new_node(File { top_levels }, Location::new_file(self.lexer.source_id()));
+        let file = self.ast.new_node(ast::File { top_levels }, Location::new_file(self.lexer.source_id()));
         Ok(file)
     }
     
-    fn parse_top_level(&mut self) -> ParseResult<TopLevel> {
+    fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel> {
         if self.curr_is_ty(TokenType::Fn) {
-            Ok(TopLevel::Function(self.parse_function()?))
+            Ok(ast::TopLevel::Function(self.parse_function()?))
         } else {
             self.error_expected_none()
         }
     }
     
-    fn parse_function(&mut self) -> ParseResult<AstRef<Function>> {
+    fn parse_function(&mut self) -> ParseResult<AstRef<ast::Function>> {
         let start = self.expect(TokenType::Fn)?;
         let name = self.expect(TokenType::Identifier)?.text.unwrap();
         self.expect(TokenType::LeftParenthesis)?;
@@ -114,10 +114,10 @@ impl<'p, 'ast> Parser<'p, 'ast> {
         let return_type = self.parse_type()?;
         let body = self.parse_block()?;
         let loc = start.loc.combine(self.ast.get_location(return_type));
-        Ok(self.ast.new_node(Function { name, return_type, body }, loc))
+        Ok(self.ast.new_node(ast::Function { name, return_type, body }, loc))
     }
 
-    fn parse_block(&mut self) -> ParseResult<AstRef<Block>> {
+    fn parse_block(&mut self) -> ParseResult<AstRef<ast::Block>> {
         let start = self.expect(TokenType::LeftBrace)?;
         let mut stmts = Vec::new();
         let mut trailing_expr = None;
@@ -129,7 +129,7 @@ impl<'p, 'ast> Parser<'p, 'ast> {
                 let expr = self.parse_expr()?;
                 if self.curr_is_ty(TokenType::Semicolon) {
                     let end = self.advance();
-                    let stmt = self.ast.new_node(Stmt::Expr(expr), self.ast.get_location(expr).combine(end.loc));
+                    let stmt = self.ast.new_node(ast::Stmt::Expr(expr), self.ast.get_location(expr).combine(end.loc));
                     stmts.push(stmt);
                 } else {
                     trailing_expr = Some(expr);
@@ -138,52 +138,47 @@ impl<'p, 'ast> Parser<'p, 'ast> {
             }
         }
         let end = self.expect(TokenType::RightBrace)?;
-        let block = Block { stmts: self.ast.new_list(stmts), trailing_expr };
+        let block = ast::Block { stmts: self.ast.new_list(stmts), trailing_expr };
         Ok(self.ast.new_node(block, start.loc.combine(end.loc)))
     }
 
-    fn parse_stmt(&mut self) -> ParseResult<Option<AstRef<Stmt>>> {
+    fn parse_stmt(&mut self) -> ParseResult<Option<AstRef<ast::Stmt>>> {
         if self.curr_is_ty(TokenType::Return) {
             let start = self.expect(TokenType::Return)?;
             let expr = self.parse_expr()?;
             let end = self.expect(TokenType::Semicolon)?;
-            Ok(Some(self.ast.new_node(Stmt::Return(expr), start.loc.combine(end.loc))))
+            Ok(Some(self.ast.new_node(ast::Stmt::Return(expr), start.loc.combine(end.loc))))
         } else {
             Ok(None)
         }
     }
 
-    pub fn parse_expr(&mut self) -> ParseResult<AstRef<Expr>> {
+    pub fn parse_expr(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         self.parse_expr_add()
     }
 
-    fn parse_expr_add(&mut self) -> ParseResult<AstRef<Expr>> {
+    fn parse_expr_add(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         let mut left = self.parse_expr_mul()?;
         loop {
-            if self.curr_is_ty(TokenType::Plus) {
-                self.expect(TokenType::Plus)?;
-                let right = self.parse_expr()?;
-                left = self.ast.new_node(Expr::Binary {
-                    op: BinaryOp::Add,
-                    left, 
-                    right
-                }, self.ast.get_location(left).combine(self.ast.get_location(right)))
+            let op = if self.curr_is_ty(TokenType::Plus) {
+                ast::BinaryOp::Add
             } else if self.curr_is_ty(TokenType::Minus) {
-                self.expect(TokenType::Minus)?;
-                let right = self.parse_expr()?;
-                left = self.ast.new_node(Expr::Binary {
-                    op: BinaryOp::Sub,
-                    left,
-                    right
-                }, self.ast.get_location(left).combine(self.ast.get_location(right)))
+                ast::BinaryOp::Sub
             } else {
                 break
-            }
+            };
+
+            self.advance();
+            let right = self.parse_expr()?;
+            left = self.ast.new_node(
+                ast::Expr::Binary { op, left, right },
+                self.ast.get_location(left).combine(self.ast.get_location(right))
+            )
         }
         Ok(left)
     }
 
-    fn parse_expr_mul(&mut self) -> ParseResult<AstRef<Expr>> {
+    fn parse_expr_mul(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         let left = self.parse_expr_call()?;
         loop {
             break
@@ -191,16 +186,19 @@ impl<'p, 'ast> Parser<'p, 'ast> {
         Ok(left)
     }
 
-    fn parse_expr_call(&mut self) -> ParseResult<AstRef<Expr>> {
+    fn parse_expr_call(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         let mut left = self.parse_expr_terminal()?;
         loop {
             if self.curr_is_ty(TokenType::Period) {
                 self.advance();
                 let attr = self.expect(TokenType::Identifier)?;
-                left = self.ast.new_node(Expr::Attr {
-                    object: left,
-                    name: attr.text.unwrap()
-                }, self.ast.get_location(left).combine(attr.loc));
+                left = self.ast.new_node(
+                    ast::Expr::Attr {
+                        object: left,
+                        name: attr.text.unwrap()
+                    },
+                    self.ast.get_location(left).combine(attr.loc)
+                );
             } else if self.curr_is_ty(TokenType::LeftParenthesis) {
                 self.advance();
                 let mut arguments = Vec::new();
@@ -215,10 +213,13 @@ impl<'p, 'ast> Parser<'p, 'ast> {
                 let end = self.expect(TokenType::RightParenthesis)?;
 
                 let arguments = self.ast.new_list(arguments);
-                left = self.ast.new_node(Expr::Call {
-                    callee: left,
-                    arguments
-                }, self.ast.get_location(left).combine(end.loc));
+                left = self.ast.new_node(
+                    ast::Expr::Call {
+                        callee: left,
+                        arguments
+                    },
+                    self.ast.get_location(left).combine(end.loc)
+                );
             } else {
                 break
             }
@@ -226,28 +227,24 @@ impl<'p, 'ast> Parser<'p, 'ast> {
         Ok(left)
     }
 
-    fn parse_expr_terminal(&mut self) -> ParseResult<AstRef<Expr>> {
+    fn parse_expr_terminal(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         if self.curr_is_ty(TokenType::Identifier) {
             let name = self.expect(TokenType::Identifier)?;
-            Ok(self.ast.new_node(Expr::Name(name.text.unwrap()), name.loc))
+            Ok(self.ast.new_node(ast::Expr::Name(name.text.unwrap()), name.loc))
         } else if self.curr_is_ty(TokenType::Integer) {
             let constant = self.expect(TokenType::Integer)?;
             let number = self.lexer.context().resolve(constant.text.unwrap()).unwrap().parse::<i64>();
             match number {
-                Ok(number) => {
-                    Ok(self.ast.new_node(Expr::Integer(number), constant.loc))
-                }
-                Err(_) => {
-                    Err(ParseError::integer_too_big(constant.loc))
-                }
+                Ok(number) => Ok(self.ast.new_node(ast::Expr::Integer(number), constant.loc)),
+                Err(_) => Err(ParseError::integer_too_big(constant.loc)),
             }
         } else {
             self.error_expected_none()
         }
     }
 
-    fn parse_type(&mut self) -> ParseResult<AstRef<Type>> {
+    fn parse_type(&mut self) -> ParseResult<AstRef<ast::Type>> {
         let token = self.expect(TokenType::Identifier)?;
-        Ok(self.ast.new_node(Type::Name(token.text.unwrap()), token.loc))
+        Ok(self.ast.new_node(ast::Type::Name(token.text.unwrap()), token.loc))
     }
 }
