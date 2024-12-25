@@ -17,8 +17,10 @@ fn main() -> u32 {
     let start = Instant::now();
     let maybe_ast = frontend.parse_source(source.id());
     match maybe_ast {
-        Ok(_) => (),
+        Ok(ast) => {
+            print!("{}", ast.pretty(2));
+        },
         Err(e) => { dbg!(e); }
     }
-    dbg!(start.elapsed());
+    // dbg!(start.elapsed());
 }
