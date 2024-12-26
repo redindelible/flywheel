@@ -4,9 +4,9 @@ use crate::frontend::{ast::{self, AST, ASTBuilder, AstRef}, lexer::Lexer, source
 use crate::frontend::source::Source;
 use crate::frontend::token::TokenStream;
 
-pub fn parse(context: Arc<StringsTable>, source_arc: Arc<Source>) -> ParseResult<Arc<AST>> {
+pub fn parse(context: Arc<StringsTable>, source: Arc<Source>) -> ParseResult<Arc<AST>> {
     let ast = AST::new(context, |context, builder| {
-        let lexer = Lexer::new(context, source_arc);
+        let lexer = Lexer::new(context, source);
         Parser::new(lexer, builder).parse_file()
     })?;
     Ok(Arc::new(ast))
@@ -44,6 +44,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 struct Parser<'ast, L> {
     token_stream: L,
+    last: Option<Token>,
     curr: Option<Token>,
     
     ast: &'ast mut ASTBuilder,
@@ -54,13 +55,13 @@ struct Parser<'ast, L> {
 impl<'ast, L: TokenStream> Parser<'ast, L> {
     fn new(mut lexer: L, ast: &'ast mut ASTBuilder) -> Self {
         let curr = lexer.next();
-        Parser { token_stream: lexer, curr, ast, possible_tokens: HashSet::new() }
+        Parser { token_stream: lexer, last: None, curr, ast, possible_tokens: HashSet::new() }
     }
 
     fn advance(&mut self) -> Token {
         if let Some(token) = self.curr {
             self.possible_tokens.clear();
-            self.curr = self.token_stream.next();
+            (self.last, self.curr) = (self.curr, self.token_stream.next());
             token
         } else {
             Token::new_eof(self.token_stream.source_id())
@@ -71,6 +72,10 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         self.possible_tokens.insert(ty);
         let curr_ty = self.curr.map_or(TokenType::EOF, |token| token.ty);
         curr_ty == ty
+    }
+    
+    fn last_was_ty(&mut self, ty: TokenType) -> bool {
+        self.last.is_some_and(|token| token.ty == ty)
     }
 
     fn error_expected_none<T>(&mut self) -> ParseResult<T> {
@@ -149,19 +154,23 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         let mut stmts = Vec::new();
         let mut trailing_expr = None;
         while !self.curr_is_ty(TokenType::RightBrace) {
+            if let Some(expr) = trailing_expr.take() {
+                let location = if self.last_was_ty(TokenType::RightBrace) {
+                    self.ast.get_location(expr)
+                } else {
+                    let end = self.expect(TokenType::Semicolon)?;
+                    self.ast.get_location(expr).combine(end.loc)
+                };
+                let stmt = self.ast.new_node(ast::Stmt::Expr(expr), location);
+                stmts.push(stmt);
+            }
+            
             let maybe_stmt = self.parse_stmt()?;
             if let Some(stmt) = maybe_stmt {
                 stmts.push(stmt);
             } else {
                 let expr = self.parse_expr()?;
-                if self.curr_is_ty(TokenType::Semicolon) {
-                    let end = self.advance();
-                    let stmt = self.ast.new_node(ast::Stmt::Expr(expr), self.ast.get_location(expr).combine(end.loc));
-                    stmts.push(stmt);
-                } else {
-                    trailing_expr = Some(expr);
-                    break;
-                }
+                trailing_expr = Some(expr);
             }
         }
         let end = self.expect(TokenType::RightBrace)?;
@@ -170,7 +179,30 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
     }
 
     fn parse_stmt(&mut self) -> ParseResult<Option<AstRef<ast::Stmt>>> {
-        if self.curr_is_ty(TokenType::Return) {
+        if self.curr_is_ty(TokenType::Let) {
+            let start = self.expect(TokenType::Let)?;
+            let name = self.expect(TokenType::Identifier)?.text.unwrap();
+            let ty = if self.curr_is_ty(TokenType::Colon) {
+                self.expect(TokenType::Colon)?;
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(TokenType::Equal)?;
+            let value = self.parse_expr()?;
+            let end = self.expect(TokenType::Semicolon)?;
+            Ok(Some(self.ast.new_node(ast::Stmt::Let { name, ty, value }, start.loc.combine(end.loc))))
+        } else if self.curr_is_ty(TokenType::While) {
+            let start = self.expect(TokenType::While)?;
+            let condition = self.parse_expr()?;
+            let body = self.parse_block()?;
+            let end = if self.curr_is_ty(TokenType::Semicolon) {
+                self.advance().loc
+            } else {
+                self.ast.get_location(body)
+            };
+            Ok(Some(self.ast.new_node(ast::Stmt::While { condition, body }, start.loc.combine(end))))
+        } else if self.curr_is_ty(TokenType::Return) {
             let start = self.expect(TokenType::Return)?;
             let expr = self.parse_expr()?;
             let end = self.expect(TokenType::Semicolon)?;
@@ -265,6 +297,33 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
                 Ok(number) => Ok(self.ast.new_node(ast::Expr::Integer(number), constant.loc)),
                 Err(_) => Err(ParseError::integer_too_big(constant.loc)),
             }
+        } else if self.curr_is_ty(TokenType::LeftBrace) {
+            let block = self.parse_block()?;
+            Ok(self.ast.new_node(ast::Expr::Block(block), self.ast.get_location(block)))
+        } else if self.curr_is_ty(TokenType::LeftParenthesis) {
+            self.advance();
+            let expr = self.parse_expr()?;
+            self.expect(TokenType::RightParenthesis)?;
+            Ok(expr)
+        } else if self.curr_is_ty(TokenType::If) {
+            let start = self.advance();
+            let condition = if self.curr_is_ty(TokenType::LeftParenthesis) {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.expect(TokenType::RightParenthesis)?;
+                expr
+            } else {
+                self.parse_expr()?
+            };
+            let then_do = self.parse_expr()?;
+            let (else_do, end) = if self.curr_is_ty(TokenType::Else) {
+                self.advance();
+                let expr = self.parse_expr()?;
+                (Some(expr), self.ast.get_location(expr))
+            } else {
+                (None, self.ast.get_location(then_do))
+            };
+            Ok(self.ast.new_node(ast::Expr::IfElse { condition, then_do, else_do }, start.loc.combine(end)))
         } else {
             self.error_expected_none()
         }
@@ -307,5 +366,10 @@ mod test {
     #[test]
     fn test_simple_struct() {
         run_ast_test!("simple-struct.fly");
+    }
+
+    #[test]
+    fn test_control_flow() {
+        run_ast_test!("control-flow.fly");
     }
 }

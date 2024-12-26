@@ -1,0 +1,80 @@
+File {
+  top_levels: [
+    Function {
+      name: "main",
+      return_type: Name {
+        name: "u32",
+        location: Location { source: 0, range: 18..21 }
+      },
+      body: Block {
+        stmts: [
+          Let {
+            name: "foo",
+            ty: None,
+            value: IfElse {
+              condition: Integer {
+                value: 0,
+                location: Location { source: 0, range: 39..40 }
+              },
+              then_do: Block {
+                stmts: [
+                ],
+                trailing_expr: Some (
+                  Integer {
+                    value: 0,
+                    location: Location { source: 0, range: 43..44 }
+                  }
+                ),
+                location: Location { source: 0, range: 41..46 }
+              },
+              else_do: Some (
+                Block {
+                  stmts: [
+                  ],
+                  trailing_expr: Some (
+                    Integer {
+                      value: 1,
+                      location: Location { source: 0, range: 54..55 }
+                    }
+                  ),
+                  location: Location { source: 0, range: 52..57 }
+                }
+              ),
+              location: Location { source: 0, range: 37..57 }
+            },
+            location: Location { source: 0, range: 28..58 }
+          },
+          While {
+            condition: Name {
+              value: "foo",
+              location: Location { source: 0, range: 71..74 }
+            },
+            body: Block {
+              stmts: [
+              ],
+              trailing_expr: Some (
+                Block {
+                  stmts: [
+                  ],
+                  trailing_expr: None,
+                  location: Location { source: 0, range: 83..86 }
+                }
+              ),
+              location: Location { source: 0, range: 73..92 }
+            },
+            location: Location { source: 0, range: 67..92 }
+          }
+        ],
+        trailing_expr: Some (
+          Name {
+            value: "foo",
+            location: Location { source: 0, range: 99..102 }
+          }
+        ),
+        location: Location { source: 0, range: 20..102 }
+      },
+      location: Location { source: 0, range: 4..21 }
+    }
+  ],
+  location: Location { source: 0, range: 0..0 }
+}

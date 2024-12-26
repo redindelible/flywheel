@@ -139,6 +139,15 @@ pub struct Block {
 }
 
 pub enum Stmt {
+    Let {
+        name: InternedString,
+        ty: Option<AstRef<Type>>,
+        value: AstRef<Expr>,
+    },
+    While {
+        condition: AstRef<Expr>,
+        body: AstRef<Block>
+    },
     Return(AstRef<Expr>),
     Expr(AstRef<Expr>)
 }
@@ -149,6 +158,7 @@ pub enum Expr {
     Integer(i64),
     String(InternedString),
     Name(InternedString),
+    Block(AstRef<Block>),
     Attr {
         object: AstRef<Expr>,
         name: InternedString
@@ -165,6 +175,11 @@ pub enum Expr {
         op: BinaryOp,
         left: AstRef<Expr>,
         right: AstRef<Expr>
+    },
+    IfElse {
+        condition: AstRef<Expr>,
+        then_do: AstRef<Expr>,
+        else_do: Option<AstRef<Expr>>,
     },
     Call {
         callee: AstRef<Expr>,
@@ -342,6 +357,26 @@ impl Pretty for Stmt {fn to_tree(&self, context: &AST, location: Location) -> Pr
                     ("location", PrettyNode::from_location(location))
                 ])
             }
+            Stmt::Let { name, ty, value } => {
+                let text = context.strings.resolve(*name).unwrap();
+                let ty = PrettyNode::from_option(ty.as_ref().map(|ty| context.to_tree(*ty)));
+                let value = context.to_tree(*value);
+                PrettyNode::from_struct("Let", [
+                    ("name", PrettyNode::from_string(format!("{:?}", text))),
+                    ("ty", ty),
+                    ("value", value),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            }
+            Stmt::While { condition, body } => {
+                let condition = context.to_tree(*condition);
+                let body = context.to_tree(*body);
+                PrettyNode::from_struct("While", [
+                    ("condition", condition),
+                    ("body", body),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            }
         }
     }
 }
@@ -424,6 +459,18 @@ impl Pretty for Expr {
                 PrettyNode::from_struct("Call", [
                     ("callee", callee),
                     ("arguments", arguments),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            }
+            Expr::Block(block) => context.to_tree(*block),
+            Expr::IfElse { condition, then_do, else_do } => {
+                let condition = context.to_tree(*condition);
+                let then_do = context.to_tree(*then_do);
+                let else_do = PrettyNode::from_option(else_do.as_ref().map(|expr| context.to_tree(*expr)));
+                PrettyNode::from_struct("IfElse", [
+                    ("condition", condition),
+                    ("then_do", then_do),
+                    ("else_do", else_do),
                     ("location", PrettyNode::from_location(location))
                 ])
             }

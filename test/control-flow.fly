@@ -1,0 +1,9 @@
+
+
+fn main() -> u32 {
+    let foo = if 0 { 0 } else { 1 };
+    while foo {
+        { }
+    }
+    foo
+}

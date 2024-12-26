@@ -35,6 +35,7 @@ const PATTERNS: &'static [(&'static str, PatternType)] = &[
     (r"\,", PatternType::Basic(TokenType::Comma)),
     (r"\:", PatternType::Basic(TokenType::Colon)),
     (r"\;", PatternType::Basic(TokenType::Semicolon)),
+    (r"\=", PatternType::Basic(TokenType::Equal)),
     (r"\+", PatternType::Basic(TokenType::Plus)),
     (r"\-", PatternType::Basic(TokenType::Minus)),
     (r"\*", PatternType::Basic(TokenType::Star)),
