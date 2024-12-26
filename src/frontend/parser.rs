@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use crate::frontend::{ast::{self, AST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
 use crate::frontend::source::Source;
+use crate::frontend::token::TokenStream;
 
 pub fn parse(context: Arc<StringsTable>, source_arc: Arc<Source>) -> ParseResult<Arc<AST>> {
     let ast = AST::new(context, |context, builder| {
@@ -39,8 +40,8 @@ impl ParseError {
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
-struct Parser<'p, 'ast> {
-    lexer: Lexer<'p>,
+struct Parser<'ast, L> {
+    token_stream: L,
     curr: Option<Token>,
     
     ast: &'ast mut ASTBuilder,
@@ -48,19 +49,19 @@ struct Parser<'p, 'ast> {
     possible_tokens: HashSet<TokenType>
 }
 
-impl<'p, 'ast> Parser<'p, 'ast> {
-    fn new(mut lexer: Lexer<'p>, ast: &'ast mut ASTBuilder) -> Self {
+impl<'ast, L: TokenStream> Parser<'ast, L> {
+    fn new(mut lexer: L, ast: &'ast mut ASTBuilder) -> Self {
         let curr = lexer.next();
-        Parser { lexer, curr, ast, possible_tokens: HashSet::new() }
+        Parser { token_stream: lexer, curr, ast, possible_tokens: HashSet::new() }
     }
 
     fn advance(&mut self) -> Token {
         if let Some(token) = self.curr {
             self.possible_tokens.clear();
-            self.curr = self.lexer.next();
+            self.curr = self.token_stream.next();
             token
         } else {
-            Token::new_eof(self.lexer.source_id())
+            Token::new_eof(self.token_stream.source_id())
         }
     }
 
@@ -71,14 +72,14 @@ impl<'p, 'ast> Parser<'p, 'ast> {
     }
 
     fn error_expected_none<T>(&mut self) -> ParseResult<T> {
-        let curr = self.curr.unwrap_or(Token::new_eof(self.lexer.source_id()));
+        let curr = self.curr.unwrap_or(Token::new_eof(self.token_stream.source_id()));
         let tys: Vec<TokenType> = self.possible_tokens.drain().collect();
         Err(ParseError::expected_any_of(&tys, curr))
     }
 
     fn expect(&mut self, ty: TokenType) -> ParseResult<Token> {
         self.possible_tokens.insert(ty);
-        let curr = self.curr.unwrap_or(Token::new_eof(self.lexer.source_id()));
+        let curr = self.curr.unwrap_or(Token::new_eof(self.token_stream.source_id()));
         if curr.ty == ty {
             self.advance();
             Ok(curr)
@@ -93,7 +94,7 @@ impl<'p, 'ast> Parser<'p, 'ast> {
             top_levels.push(self.parse_top_level()?);
         }
         let top_levels = self.ast.new_list(top_levels);
-        let file = self.ast.new_node(ast::File { top_levels }, Location::new_file(self.lexer.source_id()));
+        let file = self.ast.new_node(ast::File { top_levels }, Location::new_file(self.token_stream.source_id()));
         Ok(file)
     }
     
@@ -233,7 +234,7 @@ impl<'p, 'ast> Parser<'p, 'ast> {
             Ok(self.ast.new_node(ast::Expr::Name(name.text.unwrap()), name.loc))
         } else if self.curr_is_ty(TokenType::Integer) {
             let constant = self.expect(TokenType::Integer)?;
-            let number = self.lexer.context().resolve(constant.text.unwrap()).unwrap().parse::<i64>();
+            let number = self.token_stream.strings().resolve(constant.text.unwrap()).unwrap().parse::<i64>();
             match number {
                 Ok(number) => Ok(self.ast.new_node(ast::Expr::Integer(number), constant.loc)),
                 Err(_) => Err(ParseError::integer_too_big(constant.loc)),

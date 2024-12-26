@@ -41,4 +41,6 @@ pub struct Source {
 
 impl Source {
     pub fn id(&self) -> SourceID { self.id }
+    pub fn name(&self) -> &str { &self.name }
+    pub fn text(&self) -> &str { &self.text }
 }

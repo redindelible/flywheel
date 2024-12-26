@@ -36,7 +36,7 @@ impl<T> AstRef<T> {
 
 pub struct AST {
     strings: Arc<StringsTable>,
-    arena: Bump,
+    _arena: Bump,
     nodes: Vec<NonNull<()>>,
     locations: Vec<Location>,
     lists: Vec<(usize, NonNull<()>)>,
@@ -53,7 +53,7 @@ impl AST {
             lists: Vec::new()
         };
         let file = try_build(&strings, &mut allocator)?;
-        Ok(AST { strings, arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, file })
+        Ok(AST { strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, file })
     }
 
     pub fn get_location<T>(&self, node: AstRef<T>) -> Location {

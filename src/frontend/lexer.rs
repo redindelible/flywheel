@@ -8,6 +8,7 @@ use crate::frontend::{
     token::{Token, TokenType}
 };
 use crate::frontend::source::Source;
+use crate::frontend::token::TokenStream;
 
 #[derive(Debug)]
 pub struct LexerError {
@@ -82,14 +83,6 @@ impl<'a> Lexer<'a> {
             span,
         }
     }
-
-    pub fn context(&self) -> &'a StringsTable {
-        self.context
-    }
-
-    pub fn source_id(&self) -> SourceID {
-        self.source_id
-    }
     
     fn lex_next(&mut self) -> Option<Token> {
         self.try_lex_next().map(|maybe_token| {
@@ -134,10 +127,16 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'a> TokenStream for Lexer<'a> {
+    fn next(&mut self) -> Option<Token> {
         self.lex_next()
+    }
+
+    fn source_id(&self) -> SourceID {
+        self.source_id
+    }
+
+    fn strings(&self) -> &StringsTable {
+        self.context
     }
 }

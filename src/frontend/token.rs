@@ -1,5 +1,14 @@
-use crate::frontend::InternedString;
+use crate::frontend::{InternedString, StringsTable};
 use crate::frontend::source::{Location, SourceID};
+
+
+pub(super) trait TokenStream {
+    fn next(&mut self) -> Option<Token>;
+    
+    fn source_id(&self) -> SourceID;
+    fn strings(&self) -> &StringsTable;
+}
+
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Token {
