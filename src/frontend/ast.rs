@@ -113,13 +113,24 @@ pub struct File {
 }
 
 pub enum TopLevel {
-    Function(AstRef<Function>)
+    Function(AstRef<Function>),
+    Struct(AstRef<Struct>)
 }
 
 pub struct Function {
     pub name: InternedString,
     pub return_type: AstRef<Type>,
     pub body: AstRef<Block>
+}
+
+pub struct Struct {
+    pub name: InternedString,
+    pub fields: AstListRef<AstRef<StructField>>
+}
+
+pub struct StructField {
+    pub name: InternedString,
+    pub ty: AstRef<Type>,
 }
 
 pub struct Block {
@@ -260,7 +271,8 @@ impl Pretty for File {
 impl TopLevel {
     fn to_tree(&self, context: &AST) -> PrettyNode {
         match self {
-            TopLevel::Function(function) => context.to_tree(*function)
+            TopLevel::Function(function) => context.to_tree(*function),
+            TopLevel::Struct(struct_) => context.to_tree(*struct_),
         }
     }
 }
@@ -274,6 +286,30 @@ impl Pretty for Function {
             ("name", name),
             ("return_type", return_type),
             ("body", body),
+            ("location", PrettyNode::from_location(location))
+        ])
+    }
+}
+
+impl Pretty for Struct {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
+        let fields = PrettyNode::from_list(context.get_list(self.fields).iter().map(|field| context.to_tree(*field)));
+        PrettyNode::from_struct("Struct", [
+            ("name", name),
+            ("fields", fields),
+            ("location", PrettyNode::from_location(location))
+        ])
+    }
+}
+
+impl Pretty for StructField {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
+        let ty = context.to_tree(self.ty);
+        PrettyNode::from_struct("Field", [
+            ("name", name),
+            ("ty", ty),
             ("location", PrettyNode::from_location(location))
         ])
     }

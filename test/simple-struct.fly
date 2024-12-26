@@ -1,0 +1,9 @@
+
+
+struct Foo {
+    foo: u32;
+}
+
+fn main() -> u32 {
+    return 7;
+}

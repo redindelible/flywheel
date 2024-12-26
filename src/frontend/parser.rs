@@ -24,17 +24,19 @@ impl ParseError {
     }
     
     fn expected_any_of(possible: &[TokenType], actual: Token) -> Self {
-        if possible.len() == 0 {
-            unreachable!()
-        } else if possible.len() == 1 {
-            let s = format!("Error: Got {}, expected {}.", actual.ty.name(), possible[0].name());
-            ParseError::Located(s, actual.loc)
-        } else if possible.len() == 2 {
-            let s = format!("Error: Got {}, expected {} or {}.", actual.ty.name(), possible[0].name(), possible[1].name());
-            ParseError::Located(s, actual.loc)
-        } else {
-            todo!()
-        }
+        let message = match possible {
+            [] => unreachable!(),
+            [item] => {
+                format!("Error: Got {}, expected {}.", actual.ty.name(), item.name())
+            }
+            [item_a, item_b] => {
+                format!("Error: Got {}, expected {} or {}.", actual.ty.name(), item_a.name(), item_b.name())
+            }
+            [items @ .., last] => {
+                format!("Error: Got {}, expected any of {}, or {}.", actual.ty.name(), items.iter().map(TokenType::name).collect::<Vec<_>>().join(", "), last.name())
+            }
+        };
+        ParseError::Located(message, actual.loc)
     }
 }
 
@@ -99,13 +101,37 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
     }
     
     fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel> {
-        if self.curr_is_ty(TokenType::Fn) {
+        if self.curr_is_ty(TokenType::Struct) {
+            Ok(ast::TopLevel::Struct(self.parse_struct()?))
+        } else if self.curr_is_ty(TokenType::Fn) {
             Ok(ast::TopLevel::Function(self.parse_function()?))
         } else {
             self.error_expected_none()
         }
     }
-    
+
+    fn parse_struct(&mut self) -> ParseResult<AstRef<ast::Struct>> {
+        let start = self.expect(TokenType::Struct)?;
+        let name = self.expect(TokenType::Identifier)?.text.unwrap();
+
+        let mut fields = Vec::new();
+        self.expect(TokenType::LeftBrace)?;
+        while !self.curr_is_ty(TokenType::RightBrace) {
+            fields.push(self.parse_field()?);
+        }
+        let end = self.expect(TokenType::RightBrace)?;
+        let fields = self.ast.new_list(fields);
+        Ok(self.ast.new_node(ast::Struct { name, fields }, start.loc.combine(end.loc)))
+    }
+
+    fn parse_field(&mut self) -> ParseResult<AstRef<ast::StructField>> {
+        let name = self.expect(TokenType::Identifier)?;
+        self.expect(TokenType::Colon)?;
+        let ty = self.parse_type()?;
+        let end = self.expect(TokenType::Semicolon)?;
+        Ok(self.ast.new_node(ast::StructField { name: name.text.unwrap(), ty }, name.loc.combine(end.loc)))
+    }
+
     fn parse_function(&mut self) -> ParseResult<AstRef<ast::Function>> {
         let start = self.expect(TokenType::Fn)?;
         let name = self.expect(TokenType::Identifier)?.text.unwrap();
@@ -267,7 +293,7 @@ mod test {
             assert_eq!(pretty, expected, "(Parsed AST) == (Expected AST)");
         }};
     }
-    
+
     #[test]
     fn test_simple() {
         run_ast_test!("simple.fly");
@@ -276,5 +302,10 @@ mod test {
     #[test]
     fn test_simple_return() {
         run_ast_test!("simple-return.fly");
+    }
+
+    #[test]
+    fn test_simple_struct() {
+        run_ast_test!("simple-struct.fly");
     }
 }

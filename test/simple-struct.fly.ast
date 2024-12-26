@@ -1,0 +1,40 @@
+File {
+  top_levels: [
+    Struct {
+      name: "Foo",
+      fields: [
+        Field {
+          name: "foo",
+          ty: Name {
+            name: "u32",
+            location: Location { source: 0, range: 27..30 }
+          },
+          location: Location { source: 0, range: 22..29 }
+        }
+      ],
+      location: Location { source: 0, range: 8..31 }
+    },
+    Function {
+      name: "main",
+      return_type: Name {
+        name: "u32",
+        location: Location { source: 0, range: 48..51 }
+      },
+      body: Block {
+        stmts: [
+          Return {
+            value: Integer {
+              value: 7,
+              location: Location { source: 0, range: 63..64 }
+            },
+            location: Location { source: 0, range: 61..67 }
+          }
+        ],
+        trailing_expr: None,
+        location: Location { source: 0, range: 50..67 }
+      },
+      location: Location { source: 0, range: 34..51 }
+    }
+  ],
+  location: Location { source: 0, range: 0..0 }
+}
