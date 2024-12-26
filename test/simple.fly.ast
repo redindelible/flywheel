@@ -1,0 +1,19 @@
+File {
+  top_levels: [
+    Function {
+      name: "main",
+      return_type: Name {
+        name: "u32",
+        location: Location { source: 0, range: 16..19 }
+      },
+      body: Block {
+        stmts: [
+        ],
+        trailing_expr: None,
+        location: Location { source: 0, range: 18..21 }
+      },
+      location: Location { source: 0, range: 2..19 }
+    }
+  ],
+  location: Location { source: 0, range: 0..0 }
+}

@@ -249,3 +249,32 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         Ok(self.ast.new_node(ast::Type::Name(token.text.unwrap()), token.loc))
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+    use crate::frontend::FrontendDriver;
+
+    macro_rules! run_ast_test {
+        ($s:literal) => {{
+            let source = include_str!(concat!("../../test/", $s));
+            let mut driver = FrontendDriver::new();
+            let source = driver.add_string_source(source, $s.into());
+            let ast = driver.parse_source(source.id()).unwrap();
+            let pretty = ast.pretty(2);
+            let expected = include_str!(concat!("../../test/", $s, ".ast"));
+            assert_eq!(pretty, expected, "(Parsed AST) == (Expected AST)");
+        }};
+    }
+    
+    #[test]
+    fn test_simple() {
+        run_ast_test!("simple.fly");
+    }
+
+    #[test]
+    fn test_simple_return() {
+        run_ast_test!("simple-return.fly");
+    }
+}

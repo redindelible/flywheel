@@ -8,11 +8,7 @@ mod frontend;
 
 fn main() {
     let mut frontend = FrontendDriver::new();
-    let source = frontend.add_string_source(r"
-fn main() -> u32 {
-    return 7;
-}
-", "<text>".into());
+    let source = frontend.add_string_source(include_str!("../test/simple-return.fly"), "simple.fly".into());
     
     let start = Instant::now();
     let maybe_ast = frontend.parse_source(source.id());
@@ -22,5 +18,5 @@ fn main() -> u32 {
         },
         Err(e) => { dbg!(e); }
     }
-    // dbg!(start.elapsed());
+    dbg!(start.elapsed());
 }
