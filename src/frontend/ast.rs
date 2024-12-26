@@ -69,6 +69,11 @@ impl AST {
         let (length, ptr) = self.lists[list.0 as usize];
         unsafe { std::slice::from_raw_parts(ptr.cast::<T>().as_ptr(), length) }
     }
+
+    fn to_tree<T: Pretty>(&self, node: AstRef<T>) -> PrettyNode {
+        let location = self.get_location(node);
+        self.get(node).to_tree(self, location)
+    }
 }
 
 fn index_to_ref<T, O>(ref_fn: fn(u32, PhantomData<T>) -> O, index: usize) -> O {
@@ -232,77 +237,73 @@ impl PrettyNode {
     fn from_string(text: impl Into<String>) -> PrettyNode {
         PrettyNode::Leaf(text.into())
     }
+    
+    fn from_location(location: Location) -> PrettyNode {
+        PrettyNode::from_string(format!("{location:?}"))
+    }
 }
 
 trait Pretty {
-    type Context;
-    
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode;
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode;
 }
 
 impl Pretty for File {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
         let top_levels = PrettyNode::from_list(context.get_list(self.top_levels).iter().map(|top_level| top_level.to_tree(context)));
         PrettyNode::from_struct("File", [
-            ("top_levels", top_levels)
+            ("top_levels", top_levels),
+            ("location", PrettyNode::from_location(location))
         ])
     }
 }
 
-impl Pretty for TopLevel {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+impl TopLevel {
+    fn to_tree(&self, context: &AST) -> PrettyNode {
         match self {
-            TopLevel::Function(function) => context.get(*function).to_tree(context)
+            TopLevel::Function(function) => context.to_tree(*function)
         }
     }
 }
 
 impl Pretty for Function {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
         let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
-        let return_type = context.get(self.return_type).to_tree(context);
-        let body = context.get(self.body).to_tree(context);
+        let return_type = context.to_tree(self.return_type);
+        let body = context.to_tree(self.body);
         PrettyNode::from_struct("Function", [
             ("name", name),
             ("return_type", return_type),
-            ("body", body)
+            ("body", body),
+            ("location", PrettyNode::from_location(location))
         ])
     }
 }
 
 impl Pretty for Block {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
-        let stmts = PrettyNode::from_list(context.get_list(self.stmts).iter().map(|stmt| context.get(*stmt).to_tree(context)));
-        let trailing_expr = PrettyNode::from_option(self.trailing_expr.map(|expr| context.get(expr).to_tree(context)));
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+        let stmts = PrettyNode::from_list(context.get_list(self.stmts).iter().map(|stmt| context.to_tree(*stmt)));
+        let trailing_expr = PrettyNode::from_option(self.trailing_expr.map(|expr| context.to_tree(expr)));
         
         PrettyNode::from_struct("Block", [
             ("stmts", stmts),
-            ("trailing_expr", trailing_expr)
+            ("trailing_expr", trailing_expr),
+            ("location", PrettyNode::from_location(location))
         ])
     }
 }
 
-impl Pretty for Stmt {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+impl Pretty for Stmt {fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
         match self {
             Stmt::Return(expr) => {
-                PrettyNode::from_tuple_struct("Return", [
-                    context.get(*expr).to_tree(context)
+                PrettyNode::from_struct("Return", [
+                    ("value", context.to_tree(*expr)),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
             Stmt::Expr(expr) => {
-                PrettyNode::from_tuple_struct("Expr", [
-                    context.get(*expr).to_tree(context)
+                PrettyNode::from_struct("Expr", [
+                    ("value", context.to_tree(*expr)),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
         }
@@ -310,60 +311,84 @@ impl Pretty for Stmt {
 }
 
 impl Pretty for Expr {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
         match self {
-            Expr::Bool(value) => PrettyNode::from_string(format!("Bool({})", value)),
-            Expr::Float(value) => PrettyNode::from_string(format!("Float({})", value)),
-            Expr::Integer(value) => PrettyNode::from_string(format!("Integer({})", value)),
+            Expr::Bool(value) => {
+                PrettyNode::from_struct("Bool", [
+                    ("value", PrettyNode::from_string(format!("{}", value))),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            },
+            Expr::Float(value) => {
+                PrettyNode::from_struct("Float", [
+                    ("value", PrettyNode::from_string(format!("{}", value))),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            },
+            Expr::Integer(value) => {
+                PrettyNode::from_struct("Integer", [
+                    ("value", PrettyNode::from_string(format!("{}", value))),
+                    ("location", PrettyNode::from_location(location))
+                ])
+            },
             Expr::String(interned) => {
                 let text = context.strings.resolve(*interned).unwrap();
-                PrettyNode::from_string(format!("String({:?})", text))
+                PrettyNode::from_struct("String", [
+                    ("value", PrettyNode::from_string(format!("{:?}", text))),
+                    ("location", PrettyNode::from_location(location))
+                ])
             }
             Expr::Name(interned) => {
                 let text = context.strings.resolve(*interned).unwrap();
-                PrettyNode::from_string(format!("Name({:?})", text))
+                PrettyNode::from_struct("Name", [
+                    ("value", PrettyNode::from_string(format!("{:?}", text))),
+                    ("location", PrettyNode::from_location(location))
+                ])
             }
             Expr::Attr { object, name } => {
-                let object = context.get(*object).to_tree(context);
+                let object = context.to_tree(*object);
                 let name = context.strings.resolve(*name).unwrap();
                 PrettyNode::from_struct("Attr", [
                     ("object", object),
-                    ("name", PrettyNode::from_string(format!("{:?}", name)))
+                    ("name", PrettyNode::from_string(format!("{:?}", name))),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
             Expr::Index { object, index } => {
-                let object = context.get(*object).to_tree(context);
-                let index = context.get(*index).to_tree(context);
+                let object = context.to_tree(*object);
+                let index = context.to_tree(*index);
                 PrettyNode::from_struct("Index", [
                     ("object", object),
-                    ("index", index)
+                    ("index", index),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
             Expr::Unary { op, right } => {
-                let right = context.get(*right).to_tree(context);
+                let right = context.to_tree(*right);
                 PrettyNode::from_struct("Unary", [
                     ("op", PrettyNode::from_string(op.name())),
-                    ("right", right)
+                    ("right", right),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
             Expr::Binary { left, op, right } => {
-                let left = context.get(*left).to_tree(context);
-                let right = context.get(*right).to_tree(context);
+                let left = context.to_tree(*left);
+                let right = context.to_tree(*right);
                 PrettyNode::from_struct("Binary", [
                     ("left", left),
                     ("op", PrettyNode::from_string(op.name())),
-                    ("right", right)
+                    ("right", right),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
             Expr::Call { callee, arguments } => {
                 let arguments = context.get_list(*arguments);
-                let arguments = PrettyNode::from_list(arguments.iter().map(|arg| context.get(*arg).to_tree(context)));
-                let callee = context.get(*callee).to_tree(context);
+                let arguments = PrettyNode::from_list(arguments.iter().map(|arg| context.to_tree(*arg)));
+                let callee = context.to_tree(*callee);
                 PrettyNode::from_struct("Call", [
                     ("callee", callee),
-                    ("arguments", arguments)
+                    ("arguments", arguments),
+                    ("location", PrettyNode::from_location(location))
                 ])
             }
         }
@@ -371,13 +396,14 @@ impl Pretty for Expr {
 }
 
 impl Pretty for Type {
-    type Context = AST;
-
-    fn to_tree(&self, context: &Self::Context) -> PrettyNode {
+    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
         match self {
             Type::Name(name) => {
                 let text = context.strings.resolve(*name).unwrap();
-                PrettyNode::from_string(format!("Name({:?})", &*text))
+                PrettyNode::from_struct("Name", [
+                    ("name", PrettyNode::from_string(format!("{:?}", &*text))),
+                    ("location", PrettyNode::from_location(location))
+                ])
             }
         }
     }
@@ -448,7 +474,7 @@ impl PrettyNode {
 
 impl AST {
     pub fn pretty(&self, indent: usize) -> String {
-        let tree = self.get(self.file).to_tree(self);
+        let tree = self.to_tree(self.file);
         tree.render(&PrettyOptions { indent: String::from_iter(std::iter::repeat_n(' ', indent)), max_width: 80}, "")
     }
 }
