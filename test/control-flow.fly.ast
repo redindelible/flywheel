@@ -4,7 +4,7 @@ File {
       name: "main",
       return_type: Name {
         name: "u32",
-        location: Location { source: 0, range: 18..21 }
+        location: Location { source: 0, range: 15..18 }
       },
       body: Block {
         stmts: [
@@ -14,7 +14,7 @@ File {
             value: IfElse {
               condition: Integer {
                 value: 0,
-                location: Location { source: 0, range: 39..40 }
+                location: Location { source: 0, range: 38..39 }
               },
               then_do: Block {
                 stmts: [
@@ -22,10 +22,10 @@ File {
                 trailing_expr: Some (
                   Integer {
                     value: 0,
-                    location: Location { source: 0, range: 43..44 }
+                    location: Location { source: 0, range: 42..43 }
                   }
                 ),
-                location: Location { source: 0, range: 41..46 }
+                location: Location { source: 0, range: 40..45 }
               },
               else_do: Some (
                 Block {
@@ -34,20 +34,20 @@ File {
                   trailing_expr: Some (
                     Integer {
                       value: 1,
-                      location: Location { source: 0, range: 54..55 }
+                      location: Location { source: 0, range: 53..54 }
                     }
                   ),
-                  location: Location { source: 0, range: 52..57 }
+                  location: Location { source: 0, range: 51..56 }
                 }
               ),
-              location: Location { source: 0, range: 37..57 }
+              location: Location { source: 0, range: 35..56 }
             },
-            location: Location { source: 0, range: 28..58 }
+            location: Location { source: 0, range: 25..57 }
           },
           While {
             condition: Name {
               value: "foo",
-              location: Location { source: 0, range: 71..74 }
+              location: Location { source: 0, range: 68..71 }
             },
             body: Block {
               stmts: [
@@ -57,23 +57,23 @@ File {
                   stmts: [
                   ],
                   trailing_expr: None,
-                  location: Location { source: 0, range: 83..86 }
+                  location: Location { source: 0, range: 82..85 }
                 }
               ),
-              location: Location { source: 0, range: 73..92 }
+              location: Location { source: 0, range: 72..91 }
             },
-            location: Location { source: 0, range: 67..92 }
+            location: Location { source: 0, range: 62..91 }
           }
         ],
         trailing_expr: Some (
           Name {
             value: "foo",
-            location: Location { source: 0, range: 99..102 }
+            location: Location { source: 0, range: 96..99 }
           }
         ),
-        location: Location { source: 0, range: 20..102 }
+        location: Location { source: 0, range: 19..101 }
       },
-      location: Location { source: 0, range: 4..21 }
+      location: Location { source: 0, range: 2..18 }
     }
   ]
 }

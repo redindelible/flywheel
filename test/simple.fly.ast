@@ -4,15 +4,15 @@ File {
       name: "main",
       return_type: Name {
         name: "u32",
-        location: Location { source: 0, range: 16..19 }
+        location: Location { source: 0, range: 13..16 }
       },
       body: Block {
         stmts: [
         ],
         trailing_expr: None,
-        location: Location { source: 0, range: 18..21 }
+        location: Location { source: 0, range: 17..20 }
       },
-      location: Location { source: 0, range: 2..19 }
+      location: Location { source: 0, range: 0..16 }
     }
   ]
 }

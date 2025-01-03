@@ -7,33 +7,33 @@ File {
           name: "foo",
           ty: Name {
             name: "u32",
-            location: Location { source: 0, range: 27..30 }
+            location: Location { source: 0, range: 24..27 }
           },
-          location: Location { source: 0, range: 22..29 }
+          location: Location { source: 0, range: 19..28 }
         }
       ],
-      location: Location { source: 0, range: 8..31 }
+      location: Location { source: 0, range: 2..30 }
     },
     Function {
       name: "main",
       return_type: Name {
         name: "u32",
-        location: Location { source: 0, range: 48..51 }
+        location: Location { source: 0, range: 45..48 }
       },
       body: Block {
         stmts: [
           Return {
             value: Integer {
               value: 7,
-              location: Location { source: 0, range: 63..64 }
+              location: Location { source: 0, range: 62..63 }
             },
-            location: Location { source: 0, range: 61..67 }
+            location: Location { source: 0, range: 55..64 }
           }
         ],
         trailing_expr: None,
-        location: Location { source: 0, range: 50..67 }
+        location: Location { source: 0, range: 49..66 }
       },
-      location: Location { source: 0, range: 34..51 }
+      location: Location { source: 0, range: 32..48 }
     }
   ]
 }

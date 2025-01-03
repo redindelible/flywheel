@@ -8,14 +8,14 @@ mod frontend;
 
 fn main() {
     let frontend = FrontendDriver::new();
-    let source = frontend.add_string_source("simple.fly", include_str!("../test/simple.fly"));
+    let source = frontend.add_string_source("simple.fly", include_str!("../test/control-flow.fly"));
     
     let start = Instant::now();
     let maybe_ast = frontend.query_ast(source.id());
     dbg!(start.elapsed());
     match maybe_ast {
         Ok(ast) => {
-            print!("{}", ast.pretty(1));
+            print!("{}", ast.pretty(2));
         },
         Err(e) => { dbg!(e); }
     }

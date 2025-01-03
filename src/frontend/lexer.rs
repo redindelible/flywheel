@@ -96,9 +96,9 @@ impl<'a> Lexer<'a> {
         let mut has_leading_whitespace = false;
         while input.start() < input.haystack().len() {
             if let Some(match_) = self.regex.search(&input) {
-                input.set_start(match_.end());
                 let str = &self.text[match_.range()];
                 let loc = Location { source: self.source_id, offset: input.start() as u32, length: match_.len() as u32 };
+                input.set_start(match_.end());
 
                 match PATTERNS[match_.pattern().as_usize()].1 {
                     PatternType::Whitespace | PatternType::Comment => {
