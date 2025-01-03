@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
 use regex_automata::{Input, meta::Regex, Anchored, Span};
 
 use crate::frontend::{
     StringsTable,
     source::{Location, SourceID},
-    token::{Token, TokenType}
+    token::{Token, TokenType, TokenStream}
 };
-use crate::frontend::source::Source;
-use crate::frontend::token::TokenStream;
 
 #[derive(Debug)]
 pub struct LexerError {
@@ -68,19 +64,19 @@ pub(super) struct Lexer<'a> {
     context: &'a StringsTable,
     source_id: SourceID,
     regex: Regex,
-    source_arc: Arc<Source>,
+    text: &'a str,
     span: Span
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(context: &'a StringsTable, source_arc: Arc<Source>) -> Lexer<'a> {
-        let span = Input::new(&source_arc.text).get_span();
+    pub fn new(context: &'a StringsTable, source_id: SourceID, text: &'a str) -> Lexer<'a> {
+        let span = Input::new(text).get_span();
 
         Lexer {
             context,
-            source_id: source_arc.id(),
+            source_id,
             regex: context.lexer_shared.regex.clone(),
-            source_arc, 
+            text, 
             span,
         }
     }
@@ -94,14 +90,14 @@ impl<'a> Lexer<'a> {
     }
     
     fn try_lex_next(&mut self) -> Option<Result<Token, LexerError>> {
-        let mut input = Input::new(&self.source_arc.text).anchored(Anchored::Yes);
+        let mut input = Input::new(self.text).anchored(Anchored::Yes);
         input.set_span(self.span);
 
         let mut has_leading_whitespace = false;
         while input.start() < input.haystack().len() {
             if let Some(match_) = self.regex.search(&input) {
                 input.set_start(match_.end());
-                let str = &self.source_arc.text[match_.range()];
+                let str = &self.text[match_.range()];
                 let loc = Location { source: self.source_id, offset: input.start() as u32, length: match_.len() as u32 };
 
                 match PATTERNS[match_.pattern().as_usize()].1 {

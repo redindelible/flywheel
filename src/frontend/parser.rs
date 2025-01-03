@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use crate::frontend::{ast::{self, AST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
+use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
+use crate::frontend::ast::AstListRef;
 use crate::frontend::source::Source;
 use crate::frontend::token::TokenStream;
 
-pub fn parse(context: Arc<StringsTable>, source: Arc<Source>) -> ParseResult<Arc<AST>> {
-    let ast = AST::new(context, |context, builder| {
-        let lexer = Lexer::new(context, source);
+pub fn parse(context: Arc<StringsTable>, source: &Source) -> ParseResult<Arc<FileAST>> {
+    let ast = FileAST::new(context, |context, builder| {
+        let lexer = Lexer::new(context, source.id(), source.text());
         Parser::new(lexer, builder).parse_file()
     })?;
     Ok(Arc::new(ast))
@@ -95,14 +96,13 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         }
     }
     
-    fn parse_file(&mut self) -> ParseResult<AstRef<ast::File>> {
+    fn parse_file(&mut self) -> ParseResult<AstListRef<ast::TopLevel>> {
         let mut top_levels = vec![];
         while !self.curr_is_ty(TokenType::EOF) {
             top_levels.push(self.parse_top_level()?);
         }
         let top_levels = self.ast.new_list(top_levels);
-        let file = self.ast.new_node(ast::File { top_levels }, Location::new_file(self.token_stream.source_id()));
-        Ok(file)
+        Ok(top_levels)
     }
     
     fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel> {
@@ -341,14 +341,19 @@ mod test {
     use pretty_assertions::assert_eq;
     use crate::frontend::FrontendDriver;
 
+    fn render_ast(text: String, name: String) -> String {
+        let driver = FrontendDriver::new();
+        let source = driver.add_string_source(text, name);
+        let ast = driver.query_ast(source.id()).unwrap();
+        let pretty = ast.pretty(2);
+        pretty
+    }
+    
     macro_rules! run_ast_test {
         ($s:literal) => {{
             let source = include_str!(concat!("../../test/", $s));
-            let mut driver = FrontendDriver::new();
-            let source = driver.add_string_source(source, $s.into());
-            let ast = driver.parse_source(source.id()).unwrap();
-            let pretty = ast.pretty(2);
             let expected = include_str!(concat!("../../test/", $s, ".ast"));
+            let pretty = render_ast(source.into(), $s.into());
             assert_eq!(pretty, expected, "(Parsed AST) == (Expected AST)");
         }};
     }

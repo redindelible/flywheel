@@ -34,12 +34,16 @@ impl Debug for Location {
 }
 
 pub struct Source {
-    pub(super) id: SourceID,
-    pub(super) text: String,
-    pub(super) name: String
+    id: SourceID,
+    text: String,
+    name: String
 }
 
 impl Source {
+    pub fn new(id: SourceID, name: String, text: String) -> Self {
+        Source { id, name, text }
+    }
+    
     pub fn id(&self) -> SourceID { self.id }
     pub fn name(&self) -> &str { &self.name }
     pub fn text(&self) -> &str { &self.text }

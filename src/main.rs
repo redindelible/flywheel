@@ -7,16 +7,16 @@ mod utils;
 mod frontend;
 
 fn main() {
-    let mut frontend = FrontendDriver::new();
-    let source = frontend.add_string_source(include_str!("../test/control-flow.fly"), "simple.fly".into());
+    let frontend = FrontendDriver::new();
+    let source = frontend.add_string_source("simple.fly", include_str!("../test/control-flow.fly"));
     
     let start = Instant::now();
-    let maybe_ast = frontend.parse_source(source.id());
+    let maybe_ast = frontend.query_ast(source.id());
+    dbg!(start.elapsed());
     match maybe_ast {
         Ok(ast) => {
-            print!("{}", ast.pretty(2));
+            print!("{}", ast.pretty(1));
         },
         Err(e) => { dbg!(e); }
     }
-    dbg!(start.elapsed());
 }

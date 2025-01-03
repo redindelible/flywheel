@@ -11,6 +11,8 @@ num_enum = "0.7.3"
 string-interner = "0.18.0"
 regex-automata = "0.4.9"
 bumpalo = "3.16.0"
+dashmap = "6.1.0"
+parking_lot = "0.12.3"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

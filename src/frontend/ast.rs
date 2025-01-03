@@ -34,26 +34,26 @@ impl<T> AstRef<T> {
     }
 }
 
-pub struct AST {
+pub struct FileAST {
     strings: Arc<StringsTable>,
     _arena: Bump,
     nodes: Vec<NonNull<()>>,
     locations: Vec<Location>,
     lists: Vec<(usize, NonNull<()>)>,
 
-    file: AstRef<File>
+    top_levels: AstListRef<TopLevel>
 }
 
-impl AST {
-    pub(super) fn new<F, E>(strings: Arc<StringsTable>, try_build: F) -> Result<AST, E> where F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstRef<File>, E> {
+impl FileAST {
+    pub(super) fn new<F, E>(strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E> where F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E> {
         let mut allocator = ASTBuilder {
             arena: Bump::new(),
             nodes: Vec::new(),
             locations: Vec::new(),
             lists: Vec::new()
         };
-        let file = try_build(&strings, &mut allocator)?;
-        Ok(AST { strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, file })
+        let top_levels = try_build(&strings, &mut allocator)?;
+        Ok(FileAST { strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, top_levels })
     }
 
     pub fn get_location<T>(&self, node: AstRef<T>) -> Location {
@@ -75,6 +75,9 @@ impl AST {
         self.get(node).to_tree(self, location)
     }
 }
+
+unsafe impl Sync for FileAST { }
+unsafe impl Send for FileAST { }
 
 fn index_to_ref<T, O>(ref_fn: fn(u32, PhantomData<T>) -> O, index: usize) -> O {
     ref_fn(index.try_into().unwrap(), PhantomData)
@@ -108,13 +111,10 @@ impl ASTBuilder {
     }
 }
 
-pub struct File {
-    pub top_levels: AstListRef<TopLevel>
-}
-
 pub enum TopLevel {
     Function(AstRef<Function>),
-    Struct(AstRef<Struct>)
+    Struct(AstRef<Struct>),
+    Import(AstRef<Import>)
 }
 
 pub struct Function {
@@ -126,6 +126,10 @@ pub struct Function {
 pub struct Struct {
     pub name: InternedString,
     pub fields: AstListRef<AstRef<StructField>>
+}
+
+pub struct Import {
+    pub relative_path: InternedString
 }
 
 pub struct StructField {
@@ -270,30 +274,21 @@ impl PrettyNode {
 }
 
 trait Pretty {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode;
-}
-
-impl Pretty for File {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
-        let top_levels = PrettyNode::from_list(context.get_list(self.top_levels).iter().map(|top_level| top_level.to_tree(context)));
-        PrettyNode::from_struct("File", [
-            ("top_levels", top_levels),
-            ("location", PrettyNode::from_location(location))
-        ])
-    }
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode;
 }
 
 impl TopLevel {
-    fn to_tree(&self, context: &AST) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST) -> PrettyNode {
         match self {
             TopLevel::Function(function) => context.to_tree(*function),
             TopLevel::Struct(struct_) => context.to_tree(*struct_),
+            TopLevel::Import(import) => context.to_tree(*import),
         }
     }
 }
 
 impl Pretty for Function {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
         let return_type = context.to_tree(self.return_type);
         let body = context.to_tree(self.body);
@@ -307,7 +302,7 @@ impl Pretty for Function {
 }
 
 impl Pretty for Struct {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
         let fields = PrettyNode::from_list(context.get_list(self.fields).iter().map(|field| context.to_tree(*field)));
         PrettyNode::from_struct("Struct", [
@@ -318,8 +313,18 @@ impl Pretty for Struct {
     }
 }
 
+impl Pretty for Import {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
+        let relative_path = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.relative_path).unwrap()));
+        PrettyNode::from_struct("Import", [
+            ("relative_path", relative_path),
+            ("location", PrettyNode::from_location(location))
+        ])
+    }
+}
+
 impl Pretty for StructField {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
         let ty = context.to_tree(self.ty);
         PrettyNode::from_struct("Field", [
@@ -331,7 +336,7 @@ impl Pretty for StructField {
 }
 
 impl Pretty for Block {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         let stmts = PrettyNode::from_list(context.get_list(self.stmts).iter().map(|stmt| context.to_tree(*stmt)));
         let trailing_expr = PrettyNode::from_option(self.trailing_expr.map(|expr| context.to_tree(expr)));
         
@@ -343,7 +348,8 @@ impl Pretty for Block {
     }
 }
 
-impl Pretty for Stmt {fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+impl Pretty for Stmt {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
             Stmt::Return(expr) => {
                 PrettyNode::from_struct("Return", [
@@ -382,7 +388,7 @@ impl Pretty for Stmt {fn to_tree(&self, context: &AST, location: Location) -> Pr
 }
 
 impl Pretty for Expr {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
             Expr::Bool(value) => {
                 PrettyNode::from_struct("Bool", [
@@ -479,7 +485,7 @@ impl Pretty for Expr {
 }
 
 impl Pretty for Type {
-    fn to_tree(&self, context: &AST, location: Location) -> PrettyNode {
+    fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
             Type::Name(name) => {
                 let text = context.strings.resolve(*name).unwrap();
@@ -494,7 +500,7 @@ impl Pretty for Type {
 
 struct PrettyOptions {
     indent: String,
-    max_width: usize,
+    _max_width: usize,
 }
 
 impl PrettyNode {
@@ -555,9 +561,11 @@ impl PrettyNode {
     }
 }
 
-impl AST {
+impl FileAST {
     pub fn pretty(&self, indent: usize) -> String {
-        let tree = self.to_tree(self.file);
-        tree.render(&PrettyOptions { indent: String::from_iter(std::iter::repeat_n(' ', indent)), max_width: 80}, "")
+        let tree = PrettyNode::from_struct("File", [
+            ("top_levels", PrettyNode::from_list(self.get_list(self.top_levels).iter().map(|top_level| top_level.to_tree(self))))
+        ]);
+        tree.render(&PrettyOptions { indent: String::from_iter(std::iter::repeat_n(' ', indent)), _max_width: 80}, "")
     }
 }

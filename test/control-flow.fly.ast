@@ -75,6 +75,5 @@ File {
       },
       location: Location { source: 0, range: 4..21 }
     }
-  ],
-  location: Location { source: 0, range: 0..0 }
+  ]
 }
