@@ -3,6 +3,7 @@ mod parser;
 mod lexer;
 mod token;
 mod source;
+mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -13,18 +14,18 @@ use string_interner::{backend::BufferBackend, StringInterner};
 
 use crate::utils::ReservableKeyMap;
 
-use crate::frontend::token::TokenType;
-use crate::frontend::ast::FileAST;
-use crate::frontend::lexer::LexerShared;
-pub use crate::frontend::parser::ParseResult;
-pub use crate::frontend::source::{Source, SourceID};
+use token::TokenType;
+use ast::FileAST;
+pub use error::CompileError;
+use lexer::LexerShared;
+pub use source::{Source, SourceID};
 
 pub type InternedString = string_interner::symbol::SymbolU32;
 
 pub struct FrontendDriver {
     sources: Mutex<ReservableKeyMap<SourceID, Arc<Source>>>,
     strings: Arc<StringsTable>,
-    file_asts: DashMap<SourceID, OnceLock<ParseResult<Arc<FileAST>>>>
+    file_asts: DashMap<SourceID, OnceLock<Result<Arc<FileAST>, CompileError>>>
 }
 
 impl FrontendDriver {
@@ -36,7 +37,7 @@ impl FrontendDriver {
         }
     }
     
-    pub fn query_ast(&self, source_id: SourceID) -> ParseResult<Arc<FileAST>> {
+    pub fn query_ast(&self, source_id: SourceID) -> Result<Arc<FileAST>, CompileError> {
         let cell_ref = match self.file_asts.get(&source_id) {
             Some(cell_ref) => cell_ref,
             None => self.file_asts.entry(source_id).or_default().downgrade()

@@ -2,46 +2,43 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
 use crate::frontend::ast::AstListRef;
+use crate::frontend::error::CompileError;
 use crate::frontend::source::Source;
 use crate::frontend::token::TokenStream;
 
-pub fn parse(context: Arc<StringsTable>, source: &Source) -> ParseResult<Arc<FileAST>> {
+pub fn parse(context: Arc<StringsTable>, source: &Source) -> Result<Arc<FileAST>, CompileError> {
     let ast = FileAST::new(context, |context, builder| {
         let lexer = Lexer::new(context, source.id(), source.text());
-        Parser::new(lexer, builder).parse_file()
+        let mut parser = Parser::new(lexer, builder);
+        match parser.parse_file() {
+            Ok(top_levels) => Ok(top_levels),
+            Err(_) => Err(parser.error.unwrap())
+        }
     })?;
     Ok(Arc::new(ast))
 }
 
-#[derive(Debug, Clone)]
-pub enum ParseError {
-    Located(String, Location),
-    IntegerOutOfRange(String, Location)
+fn error_integer_too_big(location: Location) -> CompileError {
+    CompileError::with_description_and_location("parse/integer-too-big", "Integer literal too large.", location)
 }
 
-impl ParseError {
-    fn integer_too_big(location: Location) -> Self {
-        ParseError::IntegerOutOfRange(String::from("Error: Integer literal too large."), location)
-    }
-    
-    fn expected_any_of(possible: &[TokenType], actual: Token) -> Self {
-        let message = match possible {
-            [] => unreachable!(),
-            [item] => {
-                format!("Error: Got {}, expected {}.", actual.ty.name(), item.name())
-            }
-            [item_a, item_b] => {
-                format!("Error: Got {}, expected {} or {}.", actual.ty.name(), item_a.name(), item_b.name())
-            }
-            [items @ .., last] => {
-                format!("Error: Got {}, expected any of {}, or {}.", actual.ty.name(), items.iter().map(TokenType::name).collect::<Vec<_>>().join(", "), last.name())
-            }
-        };
-        ParseError::Located(message, actual.loc)
-    }
+fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileError {
+    let description = match possible {
+        [] => unreachable!(),
+        [item] => {
+            format!("Got {}, expected {}.", actual.ty.name(), item.name())
+        }
+        [item_a, item_b] => {
+            format!("Got {}, expected {} or {}.", actual.ty.name(), item_a.name(), item_b.name())
+        }
+        [items @ .., last] => {
+            format!("Got {}, expected any of {}, or {}.", actual.ty.name(), items.iter().map(TokenType::name).collect::<Vec<_>>().join(", "), last.name())
+        }
+    };
+    CompileError::with_description_and_location("parse/expected-any-of", description, actual.loc)
 }
 
-pub type ParseResult<T> = Result<T, ParseError>;
+type ParseResult<T> = Result<T, usize>;
 
 struct Parser<'ast, L> {
     token_stream: L,
@@ -50,13 +47,14 @@ struct Parser<'ast, L> {
     
     ast: &'ast mut ASTBuilder,
 
-    possible_tokens: HashSet<TokenType>
+    possible_tokens: HashSet<TokenType>,
+    error: Option<CompileError>
 }
 
 impl<'ast, L: TokenStream> Parser<'ast, L> {
     fn new(mut lexer: L, ast: &'ast mut ASTBuilder) -> Self {
         let curr = lexer.next();
-        Parser { token_stream: lexer, last: None, curr, ast, possible_tokens: HashSet::new() }
+        Parser { token_stream: lexer, last: None, curr, ast, possible_tokens: HashSet::new(), error: None }
     }
 
     fn advance(&mut self) -> Token {
@@ -78,11 +76,16 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
     fn last_was_ty(&mut self, ty: TokenType) -> bool {
         self.last.is_some_and(|token| token.ty == ty)
     }
+    
+    fn error<T>(&mut self, error: CompileError) -> ParseResult<T> {
+        self.error = Some(error);
+        Err(0)
+    }
 
     fn error_expected_none<T>(&mut self) -> ParseResult<T> {
         let curr = self.curr.unwrap_or(Token::new_eof(self.token_stream.source_id()));
         let tys: Vec<TokenType> = self.possible_tokens.drain().collect();
-        Err(ParseError::expected_any_of(&tys, curr))
+        self.error(error_expected_any_of(&tys, curr))
     }
 
     fn expect(&mut self, ty: TokenType) -> ParseResult<Token> {
@@ -295,7 +298,7 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             let number = self.token_stream.strings().resolve(constant.text.unwrap()).unwrap().parse::<i64>();
             match number {
                 Ok(number) => Ok(self.ast.new_node(ast::Expr::Integer(number), constant.loc)),
-                Err(_) => Err(ParseError::integer_too_big(constant.loc)),
+                Err(_) => self.error(error_integer_too_big(constant.loc)),
             }
         } else if self.curr_is_ty(TokenType::LeftBrace) {
             let block = self.parse_block()?;
@@ -343,7 +346,7 @@ mod test {
 
     fn render_ast(text: String, name: String) -> String {
         let driver = FrontendDriver::new();
-        let source = driver.add_string_source(text, name);
+        let source = driver.add_string_source(name, text);
         let ast = driver.query_ast(source.id()).unwrap();
         let pretty = ast.pretty(2);
         pretty
