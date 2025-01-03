@@ -6,9 +6,10 @@ mod source;
 mod error;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
-
-use parking_lot::{MappedRwLockReadGuard, Mutex, RwLock, RwLockReadGuard};
+use camino::{Utf8Path, Utf8PathBuf};
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
 use dashmap::DashMap;
 use string_interner::{backend::BufferBackend, StringInterner};
 
@@ -23,7 +24,9 @@ pub use source::{Source, SourceID};
 pub type InternedString = string_interner::symbol::SymbolU32;
 
 pub struct FrontendDriver {
-    sources: Mutex<ReservableKeyMap<SourceID, Arc<Source>>>,
+    sources: RwLock<ReservableKeyMap<SourceID, Arc<Source>>>,
+    files: DashMap<Utf8PathBuf, OnceLock<Result<SourceID, CompileError>>>,
+    
     strings: Arc<StringsTable>,
     file_asts: DashMap<SourceID, OnceLock<Result<Arc<FileAST>, CompileError>>>
 }
@@ -31,7 +34,8 @@ pub struct FrontendDriver {
 impl FrontendDriver {
     pub fn new() -> Self {
         FrontendDriver {
-            sources: Mutex::new(ReservableKeyMap::new()),
+            sources: RwLock::new(ReservableKeyMap::new()),
+            files: DashMap::new(),
             strings: Arc::new(StringsTable::new()),
             file_asts: DashMap::new()
         }
@@ -43,15 +47,38 @@ impl FrontendDriver {
             None => self.file_asts.entry(source_id).or_default().downgrade()
         };
         cell_ref.get_or_init(|| {
-            let source = Arc::clone(&self.sources.lock()[source_id]);
+            let source = Arc::clone(&self.sources.read()[source_id]);
             parser::parse(Arc::clone(&self.strings), &source)
         }).clone()
     }
+    
+    pub fn get_source(&self, source_id: SourceID) -> Option<MappedRwLockReadGuard<'_, Source>> {
+        RwLockReadGuard::try_map(self.sources.read(), |map| map.get(source_id).map(Arc::as_ref)).ok()
+    }
 
-    pub fn add_string_source(&self, name: impl Into<String>, string: impl Into<String>) -> Arc<Source> {
-        let mut sources = self.sources.lock();
-        let key = sources.add_with(|id| Arc::new(Source::new(id, name.into(), string.into())));
-        Arc::clone(&sources[key])
+    pub fn add_file_source(&self, path: impl AsRef<Path>) -> Result<SourceID, CompileError> {
+        let path = path.as_ref();
+        let Some(path) = Utf8Path::from_path(path) else {
+            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{:?}'.", path)));
+        };
+        let Ok(absolute_path) = camino::absolute_utf8(path) else {
+            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", path)));
+        };
+        let cell_ref = match self.files.get(&absolute_path) {
+            Some(cell_ref) => cell_ref,
+            None => self.files.entry(absolute_path.clone()).or_default().downgrade()
+        };
+        cell_ref.get_or_init(|| {
+            let Ok(text) = std::fs::read_to_string(&absolute_path) else {
+                return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", path)));
+            };
+            let source_id = self.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
+            Ok(source_id)
+        }).clone()
+    }
+
+    pub fn add_string_source(&self, name: impl Into<String>, string: impl Into<String>) -> SourceID {
+        self.sources.write().add_with(|id| Arc::new(Source::new_without_path(id, name.into(), string.into())))
     }
 }
 
