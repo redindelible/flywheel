@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
-
 use crate::frontend::FrontendDriver;
 use crate::frontend::source::Location;
 
@@ -20,7 +19,7 @@ impl CompileError {
         CompileError { kind, description: description.into(), location: Some(location) }
     }
 
-    pub fn with<'a>(&'a self, frontend: &'a FrontendDriver) -> CompileErrorWithFrontend<'a> {
+    pub fn display<'a>(&'a self, frontend: &'a FrontendDriver) -> CompileErrorWithFrontend<'a> {
         CompileErrorWithFrontend { error: self, frontend }
     }
 }

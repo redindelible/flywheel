@@ -1,9 +1,15 @@
+#![allow(dead_code)]
+
 pub mod keymap;
+pub mod oncemap;
+pub mod sync_interner;
 
 use std::ptr::NonNull;
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
 
-pub(crate) use keymap::{ReservableKeyMap, KeyData, declare_key_type};
+pub(crate) use keymap::{ReservableKeyMap, declare_key_type};
+pub(crate) use oncemap::OnceMap;
+pub(crate) use sync_interner::{Interner, InternedString};
 
 struct ArcSliceHeader<T> {
     ref_count: AtomicUsize,

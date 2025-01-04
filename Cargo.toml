@@ -11,10 +11,11 @@ edition = "2021"
 string-interner = "0.18.0"
 regex-automata = "0.4.9"
 bumpalo = "3.16.0"
-dashmap = "6.1.0"
+#dashmap = "6.1.0"
 parking_lot = "0.12.3"
 camino = "1.1.9"
 memchr = "2.7.4"
+tokio = { version = "1.42.0", features = ["parking_lot", "rt-multi-thread", "sync", "fs"]}
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
