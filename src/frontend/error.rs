@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
-use crate::frontend::FrontendDriver;
+use crate::frontend::Handle;
 use crate::frontend::source::Location;
 
 #[derive(Debug, Clone, Hash)]
@@ -19,27 +19,27 @@ impl CompileError {
         CompileError { kind, description: description.into(), location: Some(location) }
     }
 
-    pub fn display<'a>(&'a self, frontend: &'a FrontendDriver) -> CompileErrorWithFrontend<'a> {
-        CompileErrorWithFrontend { error: self, frontend }
+    pub fn display<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
+        CompileErrorWithHandle { error: self, handle }
     }
 }
 
-pub struct CompileErrorWithFrontend<'a> {
+pub struct CompileErrorWithHandle<'a> {
     error: &'a CompileError,
-    frontend: &'a FrontendDriver,
+    handle: &'a Handle,
 }
 
-impl<'a> Debug for CompileErrorWithFrontend<'a> {
+impl<'a> Debug for CompileErrorWithHandle<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.error)
     }
 }
 
-impl<'a> Display for CompileErrorWithFrontend<'a> {
+impl<'a> Display for CompileErrorWithHandle<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Error: {}\n", &self.error.description)?;
         if let Some(location) = self.error.location {
-            let source = self.frontend.get_source(location.source).unwrap();
+            let source = self.handle.get_source(location.source).unwrap();
             let (line, line_index, range) = source.get_line(location.offset as usize, location.length as usize).unwrap();
             let line_number = (line_index + 1).to_string();
             let padded_size = line_number.len() + 1;

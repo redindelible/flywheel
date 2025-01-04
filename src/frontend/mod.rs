@@ -25,6 +25,11 @@ pub struct FrontendDriver {
     inner: Arc<Inner>
 }
 
+#[derive(Clone)]
+pub struct Handle {
+    inner: Arc<Inner>
+}
+
 struct Inner {
     runtime: Runtime,
 
@@ -39,13 +44,19 @@ impl FrontendDriver {
     pub fn new() -> Self {
         FrontendDriver { inner: Inner::new() }
     }
-
-    pub fn spawn<F: Future + Send + 'static>(&self, task: F) -> JoinHandle<F::Output> where F::Output: Send + 'static {
-        self.inner.spawn(task)
+    
+    pub fn handle(&self) -> Handle {
+        Handle { inner: self.inner.clone() }
     }
 
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.inner.block_on(fut)
+    }
+}
+
+impl Handle {
+    pub fn spawn<F: Future + Send + 'static>(&self, task: F) -> JoinHandle<F::Output> where F::Output: Send + 'static {
+        self.inner.spawn(task)
     }
 
     pub fn get_source(&self, source_id: SourceID) -> Option<Arc<Source>> {

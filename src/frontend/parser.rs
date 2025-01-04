@@ -355,8 +355,9 @@ mod test {
 
     fn render_ast(text: String, name: String) -> String {
         let driver = FrontendDriver::new();
-        let source = driver.add_string_source(name, text);
-        let ast = driver.block_on(driver.query_ast(source)).unwrap();
+        let handle = driver.handle();
+        let source = handle.add_string_source(name, text);
+        let ast = driver.block_on(handle.query_ast(source)).unwrap();
         let pretty = ast.pretty(2);
         pretty
     }
