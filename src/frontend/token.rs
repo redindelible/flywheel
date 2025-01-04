@@ -34,6 +34,7 @@ pub enum TokenType {
     EOF,
     Error,
 
+    String,
     Integer,
     Hexadecimal,
     Binary,
@@ -42,6 +43,7 @@ pub enum TokenType {
 
     Fn,
     Struct,
+    Import,
     Let,
     If,
     Else,
@@ -75,6 +77,7 @@ impl TokenType {
         &[
             (TokenType::Fn, "fn"),
             (TokenType::Struct, "struct"),
+            (TokenType::Import, "import"),
             (TokenType::Let, "let"),
             (TokenType::If, "if"),
             (TokenType::Else, "else"),
@@ -85,8 +88,9 @@ impl TokenType {
     
     pub const fn name(&self) -> &'static str {
         match self {
-            TokenType::EOF => "end of file",
+            TokenType::EOF => "the end of input",
             TokenType::Error => "an unexpected character",
+            TokenType::String => "a string literal",
             TokenType::Integer => "a decimal number",
             TokenType::Hexadecimal => "a hexadecimal number",
             TokenType::Binary => "a binary number",
@@ -94,6 +98,7 @@ impl TokenType {
             TokenType::Identifier => "an identifier",
             TokenType::Fn => "'fn'",
             TokenType::Struct => "'struct'",
+            TokenType::Import => "'import'",
             TokenType::Let => "'let'",
             TokenType::If => "'if'",
             TokenType::Else => "'else'",

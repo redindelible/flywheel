@@ -1,0 +1,29 @@
+File {
+  top_levels: [
+    Import {
+      relative_path: "\"imported.fly\"",
+      location: Location { source: 0, range: 0..22 }
+    },
+    Function {
+      name: "main",
+      return_type: Name {
+        name: "u32",
+        location: Location { source: 0, range: 39..42 }
+      },
+      body: Block {
+        stmts: [
+          Return {
+            value: Integer {
+              value: 7,
+              location: Location { source: 0, range: 57..58 }
+            },
+            location: Location { source: 0, range: 50..59 }
+          }
+        ],
+        trailing_expr: None,
+        location: Location { source: 0, range: 43..62 }
+      },
+      location: Location { source: 0, range: 26..42 }
+    }
+  ]
+}

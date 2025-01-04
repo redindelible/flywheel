@@ -22,6 +22,7 @@ const PATTERNS: &'static [(&'static str, PatternType)] = &[
     (r"[ \t\r\n]+", PatternType::Whitespace),
     (r"#[^\n]+", PatternType::Comment),
     (r"[_\p{ID_Start}][_\p{ID_Continue}]*", PatternType::Interned(TokenType::Identifier)),
+    (r#""([^"\\]|\\.)*""#, PatternType::Interned(TokenType::String)),
     (r"0b[0-1]+", PatternType::Interned(TokenType::Binary)),
     (r"0x[a-fA-F0-9]+", PatternType::Interned(TokenType::Hexadecimal)),
     (r"[0-9]+", PatternType::Interned(TokenType::Integer)),

@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, StringsTable};
+use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, CompileResult, StringsTable};
 use crate::frontend::ast::AstListRef;
 use crate::frontend::error::CompileError;
 use crate::frontend::source::Source;
 use crate::frontend::token::TokenStream;
 
-pub fn parse(context: Arc<StringsTable>, source: &Source) -> Result<Arc<FileAST>, CompileError> {
+pub fn parse(context: Arc<StringsTable>, source: &Source) -> CompileResult<Arc<FileAST>> {
     let ast = FileAST::new(context, |context, builder| {
         let lexer = Lexer::new(context, source.id(), source.text());
         let mut parser = Parser::new(lexer, builder);
@@ -113,9 +113,18 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             Ok(ast::TopLevel::Struct(self.parse_struct()?))
         } else if self.curr_is_ty(TokenType::Fn) {
             Ok(ast::TopLevel::Function(self.parse_function()?))
+        } else if self.curr_is_ty(TokenType::Import) {
+            Ok(ast::TopLevel::Import(self.parse_import()?))
         } else {
             self.error_expected_none()
         }
+    }
+    
+    fn parse_import(&mut self) -> ParseResult<AstRef<ast::Import>> {
+        let start = self.expect(TokenType::Import)?;
+        let path = self.expect(TokenType::String)?.text.unwrap();
+        let end = self.expect(TokenType::Semicolon)?;
+        Ok(self.ast.new_node(ast::Import { relative_path: path }, start.loc.combine(end.loc)))
     }
 
     fn parse_struct(&mut self) -> ParseResult<AstRef<ast::Struct>> {
@@ -379,5 +388,10 @@ mod test {
     #[test]
     fn test_control_flow() {
         run_ast_test!("control-flow.fly");
+    }
+
+    #[test]
+    fn test_import() {
+        run_ast_test!("import.fly");
     }
 }
