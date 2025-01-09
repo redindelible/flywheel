@@ -8,7 +8,7 @@ mod type_check;
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use triomphe::{Arc, ArcBorrow};
 use camino::{Utf8Path, Utf8PathBuf};
 use futures::FutureExt;
 use tokio::runtime::Runtime;
@@ -46,8 +46,8 @@ struct Inner {
 impl FrontendDriver {
     pub fn new() -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-        
-        FrontendDriver { 
+
+        FrontendDriver {
             inner: Arc::new(Inner {
                 runtime,
                 sources: parking_lot::RwLock::new(ReservableMap::new()),
@@ -55,12 +55,12 @@ impl FrontendDriver {
                 files: OnceMap::new(),
                 asts: OnceMap::new(),
                 declared_types: OnceMap::new()
-            }) 
+            })
         }
     }
     
     pub fn handle(&self) -> Handle {
-        Handle { inner: self.inner.clone() }
+        Handle { inner: Arc::clone(&self.inner) }
     }
 
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
@@ -72,7 +72,7 @@ impl Handle {
     pub fn strings(&self) -> &StringsTable {
         &self.inner.strings
     }
-    
+
     pub fn get_source(&self, source_id: SourceID) -> Option<Arc<Source>> {
         self.inner.sources.read().get(source_id).cloned()
     }
@@ -80,7 +80,7 @@ impl Handle {
     pub async fn query_relative_source(&self, anchor: SourceID, relative_path: impl AsRef<Utf8Path>) -> CompileResult<SourceID> {
         let anchor_source = self.get_source(anchor).unwrap();
         let Some(anchor_path) = anchor_source.absolute_path() else { todo!() };
-        
+
         let new_path = anchor_path.parent().unwrap().join(relative_path.as_ref());
         let Ok(normalized_path) = normpath::PathExt::normalize(new_path.as_std_path()) else {
             return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
@@ -89,8 +89,8 @@ impl Handle {
             return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
         };
         self.query_file_source(utf8_path).await
-    } 
-    
+    }
+
     pub async fn query_file_source(&self, path: Utf8PathBuf) -> CompileResult<SourceID> {
         let Ok(absolute_path) = camino::absolute_utf8(&path) else {
             return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
@@ -104,7 +104,7 @@ impl Handle {
                 let source_id = handle.inner.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
                 Ok(source_id)
             }).map(Result::unwrap)
-        }).await
+        }).await.clone()
     }
 
     #[allow(dead_code)]
@@ -112,8 +112,8 @@ impl Handle {
         self.inner.sources.write().add_with(|id| Arc::new(Source::new_without_path(id, name, string)))
     }
 
-    pub async fn query_ast(&self, source_id: SourceID) -> CompileResult<Arc<FileAST>> {
-        let ast_or_error = self.inner.asts.get_or_init(source_id, || {
+    pub async fn query_ast(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, FileAST>> {
+        self.inner.asts.get_or_init(source_id, || {
             let handle = self.clone();
             let fut = self.inner.runtime.spawn(async move {
                 let source = handle.get_source(source_id).unwrap();
@@ -121,17 +121,16 @@ impl Handle {
                 parser::parse(string_table, &source)
             }).map(Result::unwrap);
             fut
-        }).await;
-        ast_or_error
+        }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
     }
 
-    pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<Arc<DeclaredTypes>> {
+    pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DeclaredTypes>> {
         self.inner.declared_types.get_or_init(source_id, || {
             let handle = self.clone();
             self.inner.runtime.spawn(async move {
                 DeclaredTypes::process(handle, source_id).await.map(Arc::new)
             }).map(Result::unwrap)
-        }).await
+        }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
     }
 }
 

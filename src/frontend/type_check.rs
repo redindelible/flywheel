@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use futures::FutureExt;
 use futures::stream::{StreamExt, FuturesOrdered};
 use crate::utils::InternedString;
@@ -12,7 +11,6 @@ enum Name {
 }
 
 pub struct DeclaredTypes {
-    ast: Arc<ast::FileAST>,
     file_namespace: im::HashMap<InternedString, Name>
 }
 
@@ -27,7 +25,7 @@ impl DeclaredTypes {
             .filter_map(|top_level| {
                 match top_level {
                     &ast::TopLevel::Import(ast_import) => {
-                        let relative_path = camino::Utf8PathBuf::from(strings.resolve(ast.get(ast_import).relative_path).unwrap().to_owned());
+                        let relative_path = camino::Utf8PathBuf::from(strings.resolve(ast.get_node(ast_import).relative_path).unwrap().to_owned());
                         Some(handle_ref.query_relative_source(source_id, relative_path.clone()).map(|source| (relative_path, source)))
                     }
                     _ => None
@@ -46,7 +44,7 @@ impl DeclaredTypes {
                     file_namespace.insert(name, Name::Module(source));
                 }
                 &ast::TopLevel::Struct(ast_struct) => {
-                    let struct_ = ast.get(ast_struct);
+                    let struct_ = ast.get_node(ast_struct);
                     file_namespace.insert(struct_.name, Name::Struct(source_id, ast_struct));
                 }
                 &ast::TopLevel::Function(_) => ()
@@ -54,7 +52,6 @@ impl DeclaredTypes {
         }
 
         Ok(DeclaredTypes {
-            ast,
             file_namespace
         })
     }

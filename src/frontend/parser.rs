@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::Arc;
+use triomphe::Arc;
 use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, CompileResult, StringsTable};
 use crate::frontend::ast::AstListRef;
 use crate::frontend::error::CompileError;

@@ -1,7 +1,7 @@
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::sync::Arc;
+use triomphe::Arc;
 use bumpalo::Bump;
 use crate::frontend::{InternedString, SourceID, StringsTable};
 use crate::frontend::source::Location;
@@ -82,7 +82,7 @@ impl FileAST {
         self.locations[node.as_usize()]
     }
     
-    pub fn get<T>(&self, node: AstRef<T>) -> &T {
+    pub fn get_node<T>(&self, node: AstRef<T>) -> &T {
         let ptr = self.nodes[node.as_usize()];
         unsafe { ptr.cast::<T>().as_ref() }
     }
@@ -98,7 +98,7 @@ impl FileAST {
 
     fn to_tree<T: Pretty>(&self, node: AstRef<T>) -> PrettyNode {
         let location = self.get_location(node);
-        self.get(node).to_tree(self, location)
+        self.get_node(node).to_tree(self, location)
     }
 }
 
