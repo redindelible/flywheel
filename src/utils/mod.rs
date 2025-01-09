@@ -1,15 +1,17 @@
 #![allow(dead_code)]
 
-pub mod keymap;
 pub mod oncemap;
 pub mod sync_interner;
+pub mod shared;
+pub mod keyed_map;
 
 use std::ptr::NonNull;
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
 
-pub(crate) use keymap::{ReservableKeyMap, declare_key_type};
+pub(crate) use keyed_map::*;
 pub(crate) use oncemap::OnceMap;
 pub(crate) use sync_interner::{Interner, InternedString};
+pub(crate) use shared::SharedPromise;
 
 struct ArcSliceHeader<T> {
     ref_count: AtomicUsize,

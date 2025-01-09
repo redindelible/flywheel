@@ -30,6 +30,7 @@ impl Interner {
         }
     }
 
+    // todo make this not need a guard
     pub(crate) fn resolve(&self, symbol: InternedString) -> Option<parking_lot::MappedRwLockReadGuard<'_, str>> {
         parking_lot::RwLockReadGuard::try_map(self.symbols.read(), |interner| interner.resolve(symbol.0)).ok()
     }

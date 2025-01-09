@@ -28,7 +28,7 @@ impl Location {
 
 impl Debug for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Location {{ source: {}, range: {}..{} }}", self.source.0.to_u32(), self.offset, self.offset+self.length)
+        write!(f, "Location {{ source: {:?}, range: {}..{} }}", self.source, self.offset, self.offset+self.length)
     }
 }
 

@@ -4,28 +4,33 @@ use crate::frontend::Handle;
 use crate::frontend::source::Location;
 
 #[derive(Debug, Clone, Hash)]
-pub struct CompileError {
+struct CompileErrorInner {
     kind: &'static str,
     description: Cow<'static, str>,
     location: Option<Location>
 }
 
+#[derive(Debug, Clone, Hash)]
+pub struct CompileError {
+    inner: Box<CompileErrorInner>
+}
+
 impl CompileError {
     pub fn with_description(kind: &'static str, description: impl Into<Cow<'static, str>>) -> Self {
-        CompileError { kind, description: description.into(), location: None }
+        CompileError { inner: Box::new(CompileErrorInner { kind, description: description.into(), location: None }) }
     }
 
     pub fn with_description_and_location(kind: &'static str, description: impl Into<Cow<'static, str>>, location: Location) -> Self {
-        CompileError { kind, description: description.into(), location: Some(location) }
+        CompileError { inner: Box::new(CompileErrorInner { kind, description: description.into(), location: Some(location) })}
     }
 
     pub fn display<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
-        CompileErrorWithHandle { error: self, handle }
+        CompileErrorWithHandle { error: &self.inner, handle }
     }
 }
 
 pub struct CompileErrorWithHandle<'a> {
-    error: &'a CompileError,
+    error: &'a CompileErrorInner,
     handle: &'a Handle,
 }
 

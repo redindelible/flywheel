@@ -12,11 +12,11 @@ fn main() {
     let source = frontend.block_on(handle.query_file_source("test/import.fly".into())).unwrap();
     
     let start = Instant::now();
-    let maybe_ast = frontend.block_on(handle.spawn(handle.query_ast(source))).unwrap();
+    let maybe_ast = frontend.block_on(handle.query_collected_imports(source));
     dbg!(start.elapsed());
     match maybe_ast {
-        Ok(ast) => {
-            print!("{}", ast.pretty(2));
+        Ok(_) => {
+            print!("got collected");
         },
         Err(e) => {
             print!("{}", e.display(&handle));

@@ -1,9 +1,11 @@
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use bumpalo::Bump;
-use crate::frontend::{InternedString, StringsTable};
+use crate::frontend::{InternedString, SourceID, StringsTable};
 use crate::frontend::source::Location;
+
 
 pub struct AstRef<T>(u32, PhantomData<T>);
 
@@ -15,6 +17,20 @@ impl<T> Clone for AstRef<T> {
 }
 
 impl<T> Copy for AstRef<T> { }
+
+impl<T> Hash for AstRef<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u32(self.0);
+    }
+}
+
+impl<T> PartialEq for AstRef<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for AstRef<T> { }
 
 pub struct AstListRef<T>(u32, PhantomData<T>);
 
@@ -35,6 +51,8 @@ impl<T> AstRef<T> {
 }
 
 pub struct FileAST {
+    source_id: SourceID,
+    
     strings: Arc<StringsTable>,
     _arena: Bump,
     nodes: Vec<NonNull<()>>,
@@ -45,7 +63,7 @@ pub struct FileAST {
 }
 
 impl FileAST {
-    pub(super) fn new<F, E>(strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E> where F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E> {
+    pub(super) fn new<F, E>(source_id: SourceID, strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E> where F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E> {
         let mut allocator = ASTBuilder {
             arena: Bump::new(),
             nodes: Vec::new(),
@@ -53,7 +71,11 @@ impl FileAST {
             lists: Vec::new()
         };
         let top_levels = try_build(&strings, &mut allocator)?;
-        Ok(FileAST { strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, top_levels })
+        Ok(FileAST { source_id, strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, top_levels })
+    }
+    
+    pub fn source(&self) -> SourceID {
+        self.source_id
     }
 
     pub fn get_location<T>(&self, node: AstRef<T>) -> Location {
@@ -68,6 +90,10 @@ impl FileAST {
     pub fn get_list<T>(&self, list: AstListRef<T>) -> &[T] {
         let (length, ptr) = self.lists[list.0 as usize];
         unsafe { std::slice::from_raw_parts(ptr.cast::<T>().as_ptr(), length) }
+    }
+    
+    pub fn top_levels(&self) -> &[TopLevel] {
+        self.get_list(self.top_levels)
     }
 
     fn to_tree<T: Pretty>(&self, node: AstRef<T>) -> PrettyNode {

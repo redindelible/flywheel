@@ -14,6 +14,7 @@ pub struct LexerError {
 enum PatternType {
     Whitespace,
     Comment,
+    String,
     Interned(TokenType),
     Basic(TokenType)
 }
@@ -22,7 +23,7 @@ const PATTERNS: &'static [(&'static str, PatternType)] = &[
     (r"[ \t\r\n]+", PatternType::Whitespace),
     (r"#[^\n]+", PatternType::Comment),
     (r"[_\p{ID_Start}][_\p{ID_Continue}]*", PatternType::Interned(TokenType::Identifier)),
-    (r#""([^"\\]|\\.)*""#, PatternType::Interned(TokenType::String)),
+    (r#""([^"\\]|\\.)*""#, PatternType::String),
     (r"0b[0-1]+", PatternType::Interned(TokenType::Binary)),
     (r"0x[a-fA-F0-9]+", PatternType::Interned(TokenType::Hexadecimal)),
     (r"[0-9]+", PatternType::Interned(TokenType::Integer)),
@@ -105,6 +106,11 @@ impl<'a> Lexer<'a> {
                     PatternType::Whitespace | PatternType::Comment => {
                         has_leading_whitespace = true;
                     },
+                    PatternType::String => {
+                        let symbol = self.context.get_or_intern(&str[1..str.len()-1]);
+                        self.span = input.get_span();
+                        return Some(Ok(Token { ty: TokenType::String, text: Some(symbol), has_leading_whitespace, loc }));
+                    }
                     PatternType::Interned(ty_fn) => {
                         let symbol = self.context.get_or_intern(str);
                         let ty = self.context.try_get_keyword(symbol).unwrap_or(ty_fn);

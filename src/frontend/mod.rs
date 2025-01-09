@@ -4,20 +4,23 @@ mod lexer;
 mod token;
 mod source;
 mod error;
+mod type_check;
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use camino::Utf8PathBuf;
+use std::time::Instant;
+use camino::{Utf8Path, Utf8PathBuf};
+use futures::FutureExt;
 use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
-use crate::utils::{Interner, InternedString, OnceMap, ReservableKeyMap};
+use crate::utils::{Interner, InternedString, OnceMap, ReservableMap};
 
 use token::TokenType;
 use ast::FileAST;
 pub use error::CompileError;
 use lexer::LexerShared;
 pub use source::{Source, SourceID};
+use crate::frontend::type_check::CollectImports;
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
@@ -33,16 +36,28 @@ pub struct Handle {
 struct Inner {
     runtime: Runtime,
 
-    sources: parking_lot::RwLock<ReservableKeyMap<SourceID, Arc<Source>>>,
+    sources: parking_lot::RwLock<ReservableMap<SourceID, Arc<Source>>>,
     strings: Arc<StringsTable>,
 
     files: OnceMap<Utf8PathBuf, CompileResult<SourceID>>,
-    asts: OnceMap<SourceID, CompileResult<Arc<FileAST>>>
+    asts: OnceMap<SourceID, CompileResult<Arc<FileAST>>>,
+    collected_imports: OnceMap<SourceID, CompileResult<Arc<CollectImports>>>
 }
 
 impl FrontendDriver {
     pub fn new() -> Self {
-        FrontendDriver { inner: Inner::new() }
+        let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+        
+        FrontendDriver { 
+            inner: Arc::new(Inner {
+                runtime,
+                sources: parking_lot::RwLock::new(ReservableMap::new()),
+                strings: Arc::new(StringsTable::new()),
+                files: OnceMap::new(),
+                asts: OnceMap::new(),
+                collected_imports: OnceMap::new()
+            }) 
+        }
     }
     
     pub fn handle(&self) -> Handle {
@@ -50,84 +65,79 @@ impl FrontendDriver {
     }
 
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        self.inner.block_on(fut)
+        self.inner.runtime.block_on(fut)
     }
 }
 
 impl Handle {
-    pub fn spawn<F: Future + Send + 'static>(&self, task: F) -> JoinHandle<F::Output> where F::Output: Send + 'static {
-        self.inner.spawn(task)
+    pub fn strings(&self) -> &StringsTable {
+        &self.inner.strings
     }
-
+    
     pub fn get_source(&self, source_id: SourceID) -> Option<Arc<Source>> {
-        self.inner.get_source(source_id)
+        self.inner.sources.read().get(source_id).cloned()
     }
 
-    pub fn query_file_source(&self, path: Utf8PathBuf) -> impl Future<Output=Result<SourceID, CompileError>> + 'static {
-        self.inner.clone().query_file_source(path)
-    }
-
-    #[allow(dead_code)]
-    pub fn add_string_source(&self, name: impl Into<String>, string: impl Into<String>) -> SourceID {
-        self.inner.add_string_source(name.into(), string.into())
-    }
-
-    pub fn query_ast(&self, source_id: SourceID) -> impl Future<Output=Result<Arc<FileAST>, CompileError>> + 'static {
-        self.inner.clone().query_ast(source_id)
-    }
-}
-
-
-impl Inner {
-    fn new() -> Arc<Self> {
-        Arc::new(Inner {
-            runtime: Runtime::new().unwrap(),
-            sources: parking_lot::RwLock::new(ReservableKeyMap::new()),
-            strings: Arc::new(StringsTable::new()),
-            files: OnceMap::new(),
-            asts: OnceMap::new()
-        })
-    }
-
-    fn spawn<F: Future + Send + 'static>(&self, task: F) -> JoinHandle<F::Output> where F::Output: Send + 'static {
-        self.runtime.spawn(task)
-    }
-
-    fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        self.runtime.block_on(fut)
-    }
-
-    fn get_source(&self, source_id: SourceID) -> Option<Arc<Source>> {
-        self.sources.read().get(source_id).cloned()
-    }
-
-    async fn query_file_source(self: Arc<Self>, path: Utf8PathBuf) -> Result<SourceID, CompileError> {
+    pub async fn query_relative_source(&self, anchor: SourceID, relative_path: &Utf8Path) -> CompileResult<SourceID> {
+        let anchor_source = self.get_source(anchor).unwrap();
+        let Some(anchor_path) = anchor_source.absolute_path() else { todo!() };
+        
+        let new_path = anchor_path.parent().unwrap().join(relative_path);
+        let Ok(normalized_path) = normpath::PathExt::normalize(new_path.as_std_path()) else {
+            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
+        };
+        let Ok(utf8_path) = Utf8PathBuf::from_path_buf(normalized_path.into_path_buf()) else {
+            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
+        };
+        self.query_file_source(utf8_path).await
+    } 
+    
+    pub async fn query_file_source(&self, path: Utf8PathBuf) -> CompileResult<SourceID> {
         let Ok(absolute_path) = camino::absolute_utf8(&path) else {
             return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
         };
-        self.files.get_or_init(absolute_path.clone(), || async {
-            let Ok(text) = tokio::fs::read_to_string(&absolute_path).await else {
-                return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
-            };
-            let source_id = self.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
-            Ok(source_id)
+        self.inner.files.get_or_init(absolute_path.clone(), || {
+            let handle = self.clone();
+            self.inner.runtime.spawn(async move {
+                let Ok(text) = tokio::fs::read_to_string(&absolute_path).await else {
+                    return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
+                };
+                let source_id = handle.inner.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
+                Ok(source_id)
+            }).map(Result::unwrap)
         }).await
     }
 
-    fn add_string_source(&self, name: String, string: String) -> SourceID {
-        self.sources.write().add_with(|id| Arc::new(Source::new_without_path(id, name, string)))
+    #[allow(dead_code)]
+    pub fn add_string_source(&self, name: String, string: String) -> SourceID {
+        self.inner.sources.write().add_with(|id| Arc::new(Source::new_without_path(id, name, string)))
     }
 
-    async fn query_ast(self: Arc<Self>, source_id: SourceID) -> Result<Arc<FileAST>, CompileError>{
-        self.asts.get_or_init(source_id, || async {
-            let source = Arc::clone(&self.sources.read()[source_id]);
-            parser::parse(Arc::clone(&self.strings), &source)
+    pub async fn query_ast(&self, source_id: SourceID) -> CompileResult<Arc<FileAST>> {
+        let ast_or_error = self.inner.asts.get_or_init(source_id, || {
+            let handle = self.clone();
+            let fut = self.inner.runtime.spawn(async move {
+                let source = handle.get_source(source_id).unwrap();
+                let string_table = Arc::clone(&handle.inner.strings);
+                parser::parse(string_table, &source)
+            }).map(Result::unwrap);
+            fut
+        }).await;
+        ast_or_error
+    }
+
+    pub async fn query_collected_imports(&self, source_id: SourceID) -> CompileResult<Arc<CollectImports>> {
+        self.inner.collected_imports.get_or_init(source_id, || {
+            let handle = self.clone();
+            self.inner.runtime.spawn(async move {
+                CollectImports::process(handle, source_id).await.map(Arc::new)
+            }).map(Result::unwrap)
         }).await
     }
 }
 
 
-struct StringsTable {
+pub struct StringsTable {
     symbols: Interner,
     keywords: HashMap<InternedString, TokenType>,
     lexer_shared: LexerShared,

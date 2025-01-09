@@ -1,26 +1,30 @@
-use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
-use tokio::sync::{OnceCell, RwLock};
+use std::sync::Arc;
+use std::time::Instant;
+use dashmap::DashMap;
+use tokio::sync::OnceCell;
+
 
 pub struct OnceMap<K, V> {
-    inner: RwLock<HashMap<K, OnceCell<V>>>
+    inner: DashMap<K, Arc<OnceCell<V>>>
 }
 
 impl<K, V> OnceMap<K, V> where K: Eq + Hash, V: Clone {
     pub fn new() -> Self {
-        OnceMap { inner: RwLock::new(HashMap::new()) }
+        OnceMap { inner: DashMap::new() }
     }
     
-    pub async fn get_or_init<F, Fut>(&self, k: K, init: F) -> V where F: FnOnce() -> Fut, Fut: Future<Output=V> {
-        let read_lock = self.inner.read().await;
-        if let Some(cell) = read_lock.get(&k) {
-            cell.get_or_init(init).await.clone()
-        } else {
-            drop(read_lock);
-            let mut write_lock = self.inner.write().await;
-            let cell = write_lock.entry(k).or_default();
-            cell.get_or_init(init).await.clone()
-        }
+    pub async fn get_or_init<F, Fut>(&self, k: K, init: F) -> V where K: Clone, F: FnOnce() -> Fut, Fut: Future<Output=V> {
+        // let start = Instant::now();
+        let cell = {
+            if let Some(cell) = self.inner.get(&k) {
+                cell.clone()
+            } else {
+                self.inner.entry(k).or_default().downgrade().clone()
+            }
+        };
+        // println!("Time to get cell: {:?}", start.elapsed());
+        cell.get_or_init(init).await.clone()
     }
 }
