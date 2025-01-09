@@ -1,86 +1,61 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use camino::Utf8Path;
-use futures::stream::{StreamExt, FuturesUnordered};
-use super::ast::{AstRef, FileAST, Import, Struct};
+use futures::FutureExt;
+use futures::stream::{StreamExt, FuturesOrdered};
+use crate::utils::InternedString;
+use super::ast::AstRef;
 use super::{ast, CompileResult, Handle, SourceID};
-use crate::utils::{declare_sharded_key, InternedString, ShardedKey};
 
-declare_sharded_key! {
-    struct NamespaceKey(SourceID, 1);
+#[derive(Copy, Clone)]
+enum Name {
+    Module(SourceID),
+    Struct(SourceID, AstRef<ast::Struct>)
 }
 
-pub struct TypeCheckerShared {
-    
+pub struct DeclaredTypes {
+    ast: Arc<ast::FileAST>,
+    file_namespace: im::HashMap<InternedString, Name>
 }
 
-impl TypeCheckerShared {
-    pub fn new() -> TypeCheckerShared {
-        TypeCheckerShared { }
-    }
-}
-
-pub struct CollectImports {
-    ast: Arc<FileAST>,
-    imports: HashMap<AstRef<Import>, SourceID>,
-    file_namespace: NamespaceKey
-}
-
-impl CollectImports {
+impl DeclaredTypes {
     pub async fn process(handle: Handle, source_id: SourceID) -> CompileResult<Self> {
         let strings = handle.strings();
         let ast = handle.query_ast(source_id).await?;
         let handle_ref = &handle;
-        
-        let file_namespace = NamespaceKey::sentinel(ast.source(), 0);
 
         let mut imports_stream = ast.top_levels()
             .iter()
             .filter_map(|top_level| {
                 match top_level {
                     &ast::TopLevel::Import(ast_import) => {
-                        let relative_path = strings.resolve(ast.get(ast_import).relative_path).unwrap().to_owned();
-                        Some(async move {
-                            (ast_import, handle_ref.query_relative_source(source_id, Utf8Path::new(&relative_path)).await)
-                        })
+                        let relative_path = camino::Utf8PathBuf::from(strings.resolve(ast.get(ast_import).relative_path).unwrap().to_owned());
+                        Some(handle_ref.query_relative_source(source_id, relative_path.clone()).map(|source| (relative_path, source)))
                     }
                     _ => None
                 }
             })
-            .collect::<FuturesUnordered<_>>();
-        let mut imports = HashMap::new();
-        while let Some((ast_import, maybe_source)) = imports_stream.next().await {
-            imports.insert(ast_import, maybe_source?);
+            .collect::<FuturesOrdered<_>>();
+
+        let mut file_namespace = im::HashMap::new();
+        for top_level in ast.top_levels() {
+            match top_level {
+                &ast::TopLevel::Import(_) => {
+                    let (relative_path, maybe_source) = imports_stream.next().await.unwrap();
+                    let source = maybe_source?;
+                    let name = relative_path.file_name().unwrap_or_else(|| todo!()).strip_suffix(".fly").unwrap_or_else(|| todo!());
+                    let name = strings.get_or_intern(name);
+                    file_namespace.insert(name, Name::Module(source));
+                }
+                &ast::TopLevel::Struct(ast_struct) => {
+                    let struct_ = ast.get(ast_struct);
+                    file_namespace.insert(struct_.name, Name::Struct(source_id, ast_struct));
+                }
+                &ast::TopLevel::Function(_) => ()
+            }
         }
-        
-        Ok(CollectImports {
+
+        Ok(DeclaredTypes {
             ast,
-            imports,
             file_namespace
         })
     }
-}
-
-struct StructDeclaration {
-    name: InternedString,
-}
-
-pub struct DeclaredTypes {
-    ast: Arc<FileAST>,
-
-    file_namespace: NamespaceKey,
-}
-
-enum Type {
-    
-}
-
-struct StructDefinition {
-    fields: HashMap<InternedString, Type>
-}
-
-pub struct DefinedTypes {
-    ast: Arc<FileAST>,
-    
-    structs: HashMap<AstRef<Struct>, StructDefinition>
 }

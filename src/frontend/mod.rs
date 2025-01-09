@@ -9,7 +9,6 @@ mod type_check;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Instant;
 use camino::{Utf8Path, Utf8PathBuf};
 use futures::FutureExt;
 use tokio::runtime::Runtime;
@@ -20,7 +19,7 @@ use ast::FileAST;
 pub use error::CompileError;
 use lexer::LexerShared;
 pub use source::{Source, SourceID};
-use crate::frontend::type_check::CollectImports;
+use crate::frontend::type_check::DeclaredTypes;
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
@@ -41,7 +40,7 @@ struct Inner {
 
     files: OnceMap<Utf8PathBuf, CompileResult<SourceID>>,
     asts: OnceMap<SourceID, CompileResult<Arc<FileAST>>>,
-    collected_imports: OnceMap<SourceID, CompileResult<Arc<CollectImports>>>
+    declared_types: OnceMap<SourceID, CompileResult<Arc<DeclaredTypes>>>
 }
 
 impl FrontendDriver {
@@ -55,7 +54,7 @@ impl FrontendDriver {
                 strings: Arc::new(StringsTable::new()),
                 files: OnceMap::new(),
                 asts: OnceMap::new(),
-                collected_imports: OnceMap::new()
+                declared_types: OnceMap::new()
             }) 
         }
     }
@@ -78,11 +77,11 @@ impl Handle {
         self.inner.sources.read().get(source_id).cloned()
     }
 
-    pub async fn query_relative_source(&self, anchor: SourceID, relative_path: &Utf8Path) -> CompileResult<SourceID> {
+    pub async fn query_relative_source(&self, anchor: SourceID, relative_path: impl AsRef<Utf8Path>) -> CompileResult<SourceID> {
         let anchor_source = self.get_source(anchor).unwrap();
         let Some(anchor_path) = anchor_source.absolute_path() else { todo!() };
         
-        let new_path = anchor_path.parent().unwrap().join(relative_path);
+        let new_path = anchor_path.parent().unwrap().join(relative_path.as_ref());
         let Ok(normalized_path) = normpath::PathExt::normalize(new_path.as_std_path()) else {
             return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
         };
@@ -126,11 +125,11 @@ impl Handle {
         ast_or_error
     }
 
-    pub async fn query_collected_imports(&self, source_id: SourceID) -> CompileResult<Arc<CollectImports>> {
-        self.inner.collected_imports.get_or_init(source_id, || {
+    pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<Arc<DeclaredTypes>> {
+        self.inner.declared_types.get_or_init(source_id, || {
             let handle = self.clone();
             self.inner.runtime.spawn(async move {
-                CollectImports::process(handle, source_id).await.map(Arc::new)
+                DeclaredTypes::process(handle, source_id).await.map(Arc::new)
             }).map(Result::unwrap)
         }).await
     }

@@ -12,7 +12,7 @@ fn main() {
     let source = frontend.block_on(handle.query_file_source("test/import.fly".into())).unwrap();
     
     let start = Instant::now();
-    let maybe_ast = frontend.block_on(handle.query_collected_imports(source));
+    let maybe_ast = frontend.block_on(handle.query_declared_types(source));
     dbg!(start.elapsed());
     match maybe_ast {
         Ok(_) => {

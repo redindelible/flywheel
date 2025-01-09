@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, CompileResult, StringsTable};
 use crate::frontend::ast::AstListRef;
 use crate::frontend::error::CompileError;
@@ -8,14 +7,15 @@ use crate::frontend::source::Source;
 use crate::frontend::token::TokenStream;
 
 pub fn parse(context: Arc<StringsTable>, source: &Source) -> CompileResult<Arc<FileAST>> {
-    Ok(Arc::new(FileAST::new(source.id(), context, |context, builder| {
+    let maybe_ast = FileAST::new(source.id(), context, |context, builder| {
         let lexer = Lexer::new(context, source.id(), source.text());
         let mut parser = Parser::new(lexer, builder);
         match parser.parse_file() {
             Ok(top_levels) => Ok(top_levels),
             Err(_) => Err(parser.error.unwrap())
         }
-    })?))
+    });
+    Ok(Arc::new(maybe_ast?))
 }
 
 fn error_integer_too_big(location: Location) -> CompileError {
