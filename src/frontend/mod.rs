@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use triomphe::{Arc, ArcBorrow};
 use camino::{Utf8Path, Utf8PathBuf};
-use futures::FutureExt;
+use futures_util::FutureExt;
 use tokio::runtime::Runtime;
 use crate::utils::{Interner, InternedString, OnceMap, ReservableMap};
 
@@ -115,12 +115,11 @@ impl Handle {
     pub async fn query_ast(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, FileAST>> {
         self.inner.asts.get_or_init(source_id, || {
             let handle = self.clone();
-            let fut = self.inner.runtime.spawn(async move {
+            self.inner.runtime.spawn(async move {
                 let source = handle.get_source(source_id).unwrap();
                 let string_table = Arc::clone(&handle.inner.strings);
                 parser::parse(string_table, &source)
-            }).map(Result::unwrap);
-            fut
+            }).map(Result::unwrap)
         }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
     }
 

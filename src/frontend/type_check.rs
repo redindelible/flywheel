@@ -1,5 +1,4 @@
-use futures::FutureExt;
-use futures::stream::{StreamExt, FuturesOrdered};
+use futures_util::{FutureExt, StreamExt};
 use crate::utils::InternedString;
 use super::ast::AstRef;
 use super::{ast, CompileResult, Handle, SourceID};
@@ -31,7 +30,7 @@ impl DeclaredTypes {
                     _ => None
                 }
             })
-            .collect::<FuturesOrdered<_>>();
+            .collect::<futures_util::stream::FuturesOrdered<_>>();
 
         let mut file_namespace = im::HashMap::new();
         for top_level in ast.top_levels() {
