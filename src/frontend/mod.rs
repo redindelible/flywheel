@@ -19,7 +19,7 @@ use ast::FileAST;
 pub use error::CompileError;
 use lexer::LexerShared;
 pub use source::{Source, SourceID};
-use crate::frontend::type_check::DeclaredTypes;
+use crate::frontend::type_check::{DeclaredNames, DefinedTypes, TypeCheckerShared};
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
@@ -37,24 +37,31 @@ struct Inner {
 
     sources: parking_lot::RwLock<ReservableMap<SourceID, Arc<Source>>>,
     strings: Arc<StringsTable>,
+    type_checker_shared: TypeCheckerShared,
 
     files: OnceMap<Utf8PathBuf, CompileResult<SourceID>>,
     asts: OnceMap<SourceID, CompileResult<Arc<FileAST>>>,
-    declared_types: OnceMap<SourceID, CompileResult<Arc<DeclaredTypes>>>
+    declared_types: OnceMap<SourceID, CompileResult<Arc<DeclaredNames>>>,
+    defined_types: OnceMap<SourceID, CompileResult<Arc<DefinedTypes>>>
 }
 
 impl FrontendDriver {
     pub fn new() -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
+        let strings = Arc::new(StringsTable::new());
+        let type_checker_shared = TypeCheckerShared::new(&strings);
+        
         FrontendDriver {
             inner: Arc::new(Inner {
                 runtime,
                 sources: parking_lot::RwLock::new(ReservableMap::new()),
-                strings: Arc::new(StringsTable::new()),
+                strings,
+                type_checker_shared,
                 files: OnceMap::new(),
                 asts: OnceMap::new(),
-                declared_types: OnceMap::new()
+                declared_types: OnceMap::new(),
+                defined_types: OnceMap::new(),
             })
         }
     }
@@ -71,6 +78,10 @@ impl FrontendDriver {
 impl Handle {
     pub fn strings(&self) -> &StringsTable {
         &self.inner.strings
+    }
+    
+    pub fn type_checker_shared(&self) -> &TypeCheckerShared {
+        &self.inner.type_checker_shared
     }
 
     pub fn get_source(&self, source_id: SourceID) -> Option<Arc<Source>> {
@@ -123,13 +134,22 @@ impl Handle {
         }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
     }
 
-    pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DeclaredTypes>> {
+    pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DeclaredNames>> {
         self.inner.declared_types.get_or_init(source_id, || {
             let handle = self.clone();
             self.inner.runtime.spawn(async move {
-                DeclaredTypes::process(handle, source_id).await.map(Arc::new)
+                DeclaredNames::process(&handle, source_id).await.map(Arc::new)
             }).map(Result::unwrap)
-        }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
+        }).await.as_ref().map(Arc::borrow_arc).map_err(Clone::clone)
+    }
+    
+    pub async fn query_defined_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DefinedTypes>> {
+        self.inner.defined_types.get_or_init(source_id, || {
+            let handle = self.clone();
+            self.inner.runtime.spawn(async move {
+                DefinedTypes::process(&handle, source_id).await.map(Arc::new)
+            }).map(Result::unwrap)
+        }).await.as_ref().map(Arc::borrow_arc).map_err(Clone::clone)
     }
 }
 

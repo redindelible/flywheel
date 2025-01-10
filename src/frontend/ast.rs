@@ -52,7 +52,7 @@ impl<T> AstRef<T> {
 
 pub struct FileAST {
     source_id: SourceID,
-    
+
     strings: Arc<StringsTable>,
     _arena: Bump,
     nodes: Vec<NonNull<()>>,
@@ -73,6 +73,10 @@ impl FileAST {
         let top_levels = try_build(&strings, &mut allocator)?;
         Ok(FileAST { source_id, strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, top_levels })
     }
+
+    pub fn resolve(&self, interned: InternedString) -> String {
+        self.strings.resolve(interned).unwrap().to_owned()
+    }
     
     pub fn source(&self) -> SourceID {
         self.source_id
@@ -91,7 +95,7 @@ impl FileAST {
         let (length, ptr) = self.lists[list.0 as usize];
         unsafe { std::slice::from_raw_parts(ptr.cast::<T>().as_ptr(), length) }
     }
-    
+
     pub fn top_levels(&self) -> &[TopLevel] {
         self.get_list(self.top_levels)
     }

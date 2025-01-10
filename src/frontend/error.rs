@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
+use triomphe::Arc;
 use crate::frontend::Handle;
 use crate::frontend::source::Location;
 
@@ -12,16 +13,16 @@ struct CompileErrorInner {
 
 #[derive(Debug, Clone, Hash)]
 pub struct CompileError {
-    inner: Box<CompileErrorInner>
+    inner: Arc<CompileErrorInner>
 }
 
 impl CompileError {
     pub fn with_description(kind: &'static str, description: impl Into<Cow<'static, str>>) -> Self {
-        CompileError { inner: Box::new(CompileErrorInner { kind, description: description.into(), location: None }) }
+        CompileError { inner: Arc::new(CompileErrorInner { kind, description: description.into(), location: None }) }
     }
 
     pub fn with_description_and_location(kind: &'static str, description: impl Into<Cow<'static, str>>, location: Location) -> Self {
-        CompileError { inner: Box::new(CompileErrorInner { kind, description: description.into(), location: Some(location) })}
+        CompileError { inner: Arc::new(CompileErrorInner { kind, description: description.into(), location: Some(location) })}
     }
 
     pub fn display<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
