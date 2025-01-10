@@ -46,7 +46,12 @@ impl<'a> Display for CompileErrorWithHandle<'a> {
         write!(f, "Error: {}\n", &self.error.description)?;
         if let Some(location) = self.error.location {
             let source = self.handle.get_source(location.source).unwrap();
-            let (line, line_index, range) = source.get_line(location.offset as usize, location.length as usize).unwrap();
+            let offset = if location.offset == u32::MAX {
+                source.text().len()
+            } else {
+                location.offset as usize
+            };
+            let (line, line_index, range) = source.get_line(offset, location.length as usize).unwrap();
             let line_number = (line_index + 1).to_string();
             let padded_size = line_number.len() + 1;
             write!(f, "{:pad$}{arrow} {name}\n", "", pad=padded_size, arrow="-->", name=source.name())?;
