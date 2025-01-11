@@ -3,8 +3,10 @@ use std::fmt::{Debug, Display, Formatter};
 
 use triomphe::Arc;
 
-use crate::frontend::Handle;
+use crate::frontend::driver::{FrontendDriver, Handle};
 use crate::frontend::source::Location;
+
+pub type CompileResult<T> = Result<T, CompileError>;
 
 #[derive(Debug, Clone, Hash)]
 struct CompileErrorInner {
@@ -33,7 +35,11 @@ impl CompileError {
         }
     }
 
-    pub fn display<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
+    pub fn display<'a>(&'a self, frontend: &'a FrontendDriver) -> CompileErrorWithHandle<'a> {
+        self.display_from_handle(frontend.get_handle())
+    }
+
+    fn display_from_handle<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
         CompileErrorWithHandle { error: &self.inner, handle }
     }
 }
@@ -53,7 +59,7 @@ impl Display for CompileErrorWithHandle<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Error: {}", &self.error.description)?;
         if let Some(location) = self.error.location {
-            let source = self.handle.get_source(location.source).unwrap();
+            let source = self.handle.get_source(location.source);
             let offset = if location.offset == u32::MAX { source.text().len() } else { location.offset as usize };
             let (line, line_index, range) = source.get_line(offset, location.length as usize).unwrap();
             let line_number = (line_index + 1).to_string();

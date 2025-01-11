@@ -19,16 +19,16 @@ where
     pub async fn get_or_init<F, Fut>(&self, k: K, init: F) -> &V
     where
         K: Clone,
-        F: FnOnce() -> Fut,
+        F: FnOnce(K) -> Fut,
         Fut: Future<Output = V>,
     {
         let cell: &'_ OnceCell<V> = {
             let cell_ref = match self.inner.get(&k) {
                 Some(cell_ref) => cell_ref,
-                None => self.inner.entry(k).or_default().downgrade(),
+                None => self.inner.entry(k.clone()).or_default().downgrade(),
             };
             unsafe { std::mem::transmute::<&OnceCell<V>, &'_ OnceCell<V>>(&*cell_ref) }
         };
-        cell.get_or_init(init).await
+        cell.get_or_init(move || init(k)).await
     }
 }

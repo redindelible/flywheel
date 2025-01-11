@@ -2,23 +2,38 @@ use std::collections::HashSet;
 
 use triomphe::Arc;
 
-use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
-use crate::frontend::error::CompileError;
+use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST, StringsTable};
+use crate::frontend::driver::Handle;
+use crate::frontend::error::{CompileError, CompileResult};
 use crate::frontend::lexer::Lexer;
-use crate::frontend::source::{Location, Source};
+use crate::frontend::query::Processor;
+use crate::frontend::source::{Location, SourceID};
 use crate::frontend::token::{Token, TokenStream, TokenType};
-use crate::frontend::{CompileResult, StringsTable};
 
-pub fn parse(context: Arc<StringsTable>, source: &Source) -> CompileResult<Arc<FileAST>> {
-    let maybe_ast = FileAST::new(source.id(), context, |context, builder| {
-        let lexer = Lexer::new(context, source.id(), source.text());
-        let mut parser = Parser::new(lexer, builder);
-        match parser.parse_file() {
-            Ok(top_levels) => Ok(top_levels),
-            Err(_) => Err(parser.error.unwrap()),
-        }
-    });
-    Ok(Arc::new(maybe_ast?))
+pub struct Parse(Arc<StringsTable>);
+
+impl Parse {
+    pub fn new(table: Arc<StringsTable>) -> Self {
+        Parse(table)
+    }
+}
+
+impl Processor for Parse {
+    type Input = SourceID;
+    type Output = FileAST;
+
+    async fn process(handle: Handle, input: SourceID) -> CompileResult<FileAST> {
+        let source = handle.get_source(input);
+        let strings = handle.processor::<Parse>().0.clone();
+        FileAST::new(source.id(), strings, |context, builder| {
+            let lexer = Lexer::new(context, source.id(), source.text());
+            let mut parser = Parser::new(lexer, builder);
+            match parser.parse_file() {
+                Ok(top_levels) => Ok(top_levels),
+                Err(_) => Err(parser.error.unwrap()),
+            }
+        })
+    }
 }
 
 fn error_integer_too_big(location: Location) -> CompileError {
@@ -350,13 +365,17 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
 mod test {
     use pretty_assertions::assert_eq;
 
-    use crate::frontend::FrontendDriver;
+    use crate::frontend::driver::FrontendDriver;
+    use crate::frontend::parser::Parse;
+    use crate::frontend::source::{SourceInput, Sources};
 
-    fn render_ast(text: String, name: String) -> String {
+    fn render_ast(text: String, _name: String) -> String {
         let driver = FrontendDriver::new();
-        let handle = driver.handle();
-        let source = handle.add_string_source(name, text);
-        let ast = driver.block_on(handle.query_ast(source)).unwrap();
+        let handle = driver.get_handle();
+        let ast = driver.block_on(async {
+            let source = *handle.query::<Sources>(SourceInput::String(text)).await.unwrap();
+            handle.query::<Parse>(source).await.unwrap()
+        });
         ast.pretty(2)
     }
 

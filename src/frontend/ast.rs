@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -7,8 +8,41 @@ use std::ptr::NonNull;
 use bumpalo::Bump;
 use triomphe::Arc;
 
-use crate::frontend::source::Location;
-use crate::frontend::{InternedString, SourceID, StringsTable};
+use crate::frontend::lexer::LexerShared;
+use crate::frontend::source::{Location, SourceID};
+use crate::frontend::token::TokenType;
+use crate::utils::{InternedString, Interner};
+
+pub struct StringsTable {
+    symbols: Interner,
+    keywords: HashMap<InternedString, TokenType>,
+    pub(super) lexer_shared: LexerShared,
+}
+
+impl StringsTable {
+    pub fn new() -> Self {
+        let symbols = Interner::new();
+        Self {
+            keywords: HashMap::from_iter(
+                TokenType::keywords().iter().map(|&(ty, text)| (symbols.get_or_intern_static(text), ty)),
+            ),
+            symbols,
+            lexer_shared: LexerShared::new(),
+        }
+    }
+
+    pub fn resolve(&self, symbol: InternedString) -> Option<parking_lot::MappedRwLockReadGuard<'_, str>> {
+        self.symbols.resolve(symbol)
+    }
+
+    pub fn get_or_intern(&self, text: &str) -> InternedString {
+        self.symbols.get_or_intern(text)
+    }
+
+    pub fn try_get_keyword(&self, symbol: InternedString) -> Option<TokenType> {
+        self.keywords.get(&symbol).copied()
+    }
+}
 
 pub struct AstRef<T>(u32, PhantomData<T>);
 
@@ -82,6 +116,10 @@ impl FileAST {
             lists: allocator.lists,
             top_levels,
         })
+    }
+
+    pub fn strings(&self) -> &StringsTable {
+        &self.strings
     }
 
     pub fn resolve(&self, interned: InternedString) -> String {

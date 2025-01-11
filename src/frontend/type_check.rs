@@ -1,12 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
+use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
-use futures_util::{FutureExt, StreamExt};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::ast::AstRef;
-use crate::frontend::source::Location;
-use crate::frontend::{CompileError, CompileResult, Handle, SourceID, StringsTable, ast};
+use crate::frontend::ast::{self, AstRef, StringsTable};
+use crate::frontend::driver::Handle;
+use crate::frontend::error::{CompileError, CompileResult};
+use crate::frontend::parser::Parse;
+use crate::frontend::query::Processor;
+use crate::frontend::source::{Location, SourceID, SourceInput, Sources};
 use crate::utils::InternedString;
 
 #[derive(Copy, Clone)]
@@ -60,19 +63,6 @@ impl Namespace {
     }
 }
 
-pub struct TypeCheckerShared {
-    root_namespace: Namespace,
-}
-
-impl TypeCheckerShared {
-    pub fn new(strings: &StringsTable) -> Self {
-        let mut root_namespace = Namespace::new(None);
-        root_namespace.insert(strings.get_or_intern("u32"), Value::TypeAlias(Type::Integer), None).unwrap();
-
-        TypeCheckerShared { root_namespace }
-    }
-}
-
 pub struct DeclaredNames {
     ast: Arc<ast::FileAST>,
 
@@ -80,24 +70,34 @@ pub struct DeclaredNames {
     file_namespace: Namespace,
 }
 
-impl DeclaredNames {
-    pub async fn process(handle: &Handle, source_id: SourceID) -> CompileResult<Self> {
-        let strings = handle.strings();
-        let ast = handle.query_ast(source_id).await?.clone_arc();
+pub struct ComputeDeclaredNames;
+
+impl Processor for ComputeDeclaredNames {
+    type Input = SourceID;
+    type Output = DeclaredNames;
+
+    async fn process(handle: Handle, source_id: SourceID) -> CompileResult<DeclaredNames> {
+        let ast = handle.query::<Parse>(source_id).await?.clone_arc();
+        let strings = ast.strings();
 
         let mut imports_stream = ast
             .top_levels()
             .iter()
             .filter_map(|top_level| match top_level {
                 &ast::TopLevel::Import(ast_import) => {
-                    let relative_path = camino::Utf8PathBuf::from(
-                        strings.resolve(ast.get_node(ast_import).relative_path).unwrap().to_owned(),
-                    );
-                    Some(
-                        handle
-                            .query_relative_source(source_id, relative_path.clone())
-                            .map(|source| (relative_path, source)),
-                    )
+                    let relative_path = camino::Utf8PathBuf::from(ast.resolve(ast.get_node(ast_import).relative_path));
+
+                    let handle_ref = &handle;
+                    Some(async move {
+                        let maybe_source = match SourceInput::from_relative_path(
+                            handle_ref.get_source(source_id).get(),
+                            &relative_path,
+                        ) {
+                            Ok(input) => handle_ref.query::<Sources>(input).await.map(|s| *s),
+                            Err(e) => Err(e),
+                        };
+                        (relative_path, maybe_source)
+                    })
                 }
                 _ => None,
             })
@@ -112,6 +112,7 @@ impl DeclaredNames {
                     let source = maybe_source?;
                     direct_imports.insert(source); // todo check no duplicates?
                     let value = Value::Import(source);
+                    // todo do this during parsing
                     let name = strings.get_or_intern(
                         relative_path.file_name().and_then(|path| path.strip_suffix(".fly")).unwrap_or_else(|| todo!()),
                     );
@@ -128,11 +129,10 @@ impl DeclaredNames {
             };
 
             if let Err(_previous_location) = file_namespace.insert(name, value, Some(location)) {
-                let str = strings.resolve(name).unwrap();
                 // todo note
                 return Err(CompileError::with_description_and_location(
                     "type-check/redefinition",
-                    format!("Name '{}' was already defined in this scope.", str),
+                    format!("Name '{}' was already defined in this scope.", ast.resolve(name)),
                     location,
                 ));
             };
@@ -163,7 +163,7 @@ impl<'a> NamespaceResolver<'a> {
 
     fn get_namespace(&self, namespace: NamespaceRef) -> &'a Namespace {
         match namespace {
-            NamespaceRef::Root => &self.handle.type_checker_shared().root_namespace,
+            NamespaceRef::Root => &self.handle.processor::<ComputeDefinedTypes>().root_namespace,
             NamespaceRef::Module(source) => self.names.get(&source).unwrap(),
         }
     }
@@ -228,7 +228,7 @@ async fn parallel_trace_imports(
     loop {
         while let Some(next) = to_visit.pop() {
             debug_assert!(visited.contains_key(&next));
-            in_progress.push(async move { (next, handle.query_declared_types(next).await) });
+            in_progress.push(async move { (next, handle.query::<ComputeDeclaredNames>(next).await) });
         }
         if let Some((next_id, next_declared)) = in_progress.next().await {
             let next_declared = next_declared?;
@@ -247,13 +247,29 @@ async fn parallel_trace_imports(
     Ok(HashMap::from_iter(visited.into_iter().map(|(s, opt)| (s, opt.unwrap()))))
 }
 
-impl DefinedTypes {
-    pub async fn process(handle: &Handle, source_id: SourceID) -> CompileResult<Self> {
-        let all_dependencies = parallel_trace_imports(handle, source_id).await?;
+pub struct ComputeDefinedTypes {
+    root_namespace: Namespace,
+}
+
+impl ComputeDefinedTypes {
+    pub fn new(strings: &StringsTable) -> Self {
+        let mut root_namespace = Namespace::new(None);
+        root_namespace.insert(strings.get_or_intern("u32"), Value::TypeAlias(Type::Integer), None).unwrap();
+
+        ComputeDefinedTypes { root_namespace }
+    }
+}
+
+impl Processor for ComputeDefinedTypes {
+    type Input = SourceID;
+    type Output = DefinedTypes;
+
+    async fn process(handle: Handle, source_id: SourceID) -> CompileResult<DefinedTypes> {
+        let all_dependencies = parallel_trace_imports(&handle, source_id).await?;
         let ast = &all_dependencies[&source_id].ast;
 
         let resolver = NamespaceResolver::new(
-            handle,
+            &handle,
             all_dependencies.iter().map(|(&source, &declared)| (source, &declared.get().file_namespace)).collect(),
         );
 

@@ -1,7 +1,7 @@
 use regex_automata::meta::Regex;
 use regex_automata::{Anchored, Input, Span};
 
-use crate::frontend::StringsTable;
+use crate::frontend::ast::StringsTable;
 use crate::frontend::source::{Location, SourceID};
 use crate::frontend::token::{Token, TokenStream, TokenType};
 

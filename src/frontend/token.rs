@@ -1,5 +1,6 @@
+use crate::frontend::ast::StringsTable;
 use crate::frontend::source::{Location, SourceID};
-use crate::frontend::{InternedString, StringsTable};
+use crate::utils::InternedString;
 
 pub(super) trait TokenStream {
     fn next(&mut self) -> Option<Token>;

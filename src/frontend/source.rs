@@ -4,11 +4,95 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use triomphe::{Arc, ArcBorrow};
 
-use crate::utils::declare_key_type;
+use crate::frontend::driver::Handle;
+use crate::frontend::error::{CompileError, CompileResult};
+use crate::frontend::query::Processor;
+use crate::utils::{ReservableMap, declare_key_type};
 
 declare_key_type! {
     pub struct SourceID;
+}
+
+#[derive(Eq, PartialEq, Hash, Clone)]
+pub enum SourceInput {
+    String(String),
+    AbsolutePath(Utf8PathBuf),
+}
+
+impl SourceInput {
+    pub fn from_relative_path(anchor_source: &Source, relative_path: &Utf8Path) -> CompileResult<Self> {
+        let Some(anchor_path) = anchor_source.absolute_path() else { todo!() };
+
+        let new_path = anchor_path.parent().unwrap().join(relative_path);
+        let Ok(normalized_path) = normpath::PathExt::normalize(new_path.as_std_path()) else {
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &new_path),
+            ));
+        };
+        let Ok(utf8_path) = Utf8PathBuf::from_path_buf(normalized_path.into_path_buf()) else {
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &new_path),
+            ));
+        };
+        let Ok(abs_path) = camino::absolute_utf8(utf8_path) else {
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &new_path),
+            ));
+        };
+
+        Ok(SourceInput::AbsolutePath(abs_path))
+    }
+}
+
+pub struct Sources {
+    table: parking_lot::RwLock<ReservableMap<SourceID, Arc<Source>>>,
+}
+
+impl Sources {
+    pub fn new() -> Self {
+        Sources { table: parking_lot::RwLock::new(ReservableMap::new()) }
+    }
+
+    pub fn get_source(&self, source_id: SourceID) -> ArcBorrow<'_, Source> {
+        let read_guard = self.table.read();
+        unsafe {
+            std::mem::transmute::<ArcBorrow<'_, Source>, ArcBorrow<'_, Source>>(
+                read_guard.get(source_id).unwrap().borrow_arc(),
+            )
+        }
+    }
+}
+
+impl Processor for Sources {
+    type Input = SourceInput;
+    type Output = SourceID;
+
+    async fn process(handle: Handle, input: SourceInput) -> CompileResult<SourceID> {
+        let (absolute_path, name, text) = match input {
+            SourceInput::String(text) => (None, "<string>".into(), text),
+            SourceInput::AbsolutePath(absolute_path) => {
+                let Ok(text) = tokio::fs::read_to_string(&absolute_path).await else {
+                    return Err(CompileError::with_description(
+                        "fs/could-not-open-file",
+                        format!("Could not open the file '{}'.", &absolute_path),
+                    ));
+                };
+                let name = absolute_path.file_stem().unwrap().to_owned();
+                (Some(absolute_path), name, text)
+            }
+        };
+        let source_id = handle
+            .processor::<Sources>()
+            .table
+            .write()
+            .add_with(|id| Arc::new(Source::new(id, absolute_path, name, text)));
+        Ok(source_id)
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -44,12 +128,8 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn new(id: SourceID, absolute_path: Utf8PathBuf, name: String, text: String) -> Self {
-        Source { id, absolute_path: Some(absolute_path), name, text, line_offsets: OnceLock::new() }
-    }
-
-    pub fn new_without_path(id: SourceID, name: String, text: String) -> Self {
-        Source { id, absolute_path: None, name, text, line_offsets: OnceLock::new() }
+    fn new(id: SourceID, absolute_path: Option<Utf8PathBuf>, name: String, text: String) -> Self {
+        Source { id, absolute_path, name, text, line_offsets: OnceLock::new() }
     }
 
     pub fn id(&self) -> SourceID {
