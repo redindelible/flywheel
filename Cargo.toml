@@ -27,3 +27,6 @@ pretty_assertions = "1.4.1"
 #[dependencies.regex-automata]
 #default-features = false
 #features = ["std", "perf", "unicode", "syntax", ]
+
+[lints.clippy]
+large_futures = { level = "warn" }
