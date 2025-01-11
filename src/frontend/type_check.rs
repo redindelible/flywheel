@@ -143,6 +143,7 @@ impl DeclaredNames {
 }
 
 pub struct DefinedTypes {
+    dependencies: HashSet<SourceID>,
     structs: HashMap<AstRef<ast::Struct>, StructDefinition>,
 }
 
@@ -249,46 +250,31 @@ async fn parallel_trace_imports(
 impl DefinedTypes {
     pub async fn process(handle: &Handle, source_id: SourceID) -> CompileResult<Self> {
         let all_dependencies = parallel_trace_imports(handle, source_id).await?;
+        let ast = &all_dependencies[&source_id].ast;
 
         let resolver = NamespaceResolver::new(
             handle,
             all_dependencies.iter().map(|(&source, &declared)| (source, &declared.get().file_namespace)).collect(),
         );
 
-        let ast = &all_dependencies[&source_id].ast;
-
-        let file_namespace = NamespaceRef::Module(source_id);
-
-        let mut struct_futures = ast
-            .top_levels()
-            .iter()
-            .filter_map(|top_level| {
-                match *top_level {
-                    ast::TopLevel::Struct(ast_struct) => {
-                        let resolver_ref = &resolver;
-                        Some(async move {
-                            let struct_ = ast.get_node(ast_struct);
-                            let mut fields = HashMap::new();
-                            for &ast_field in ast.get_list(struct_.fields) {
-                                let field = ast.get_node(ast_field);
-                                let field_type = resolver_ref.resolve_type(file_namespace, ast, field.ty)?;
-                                fields.insert(field.name, field_type); // todo check no duplicates
-                            }
-                            Ok((ast_struct, StructDefinition { fields }))
-                        })
-                    }
-                    ast::TopLevel::Import(_) => None,
-                    ast::TopLevel::Function(_) => None,
-                }
-            })
-            .collect::<FuturesOrdered<_>>();
-
         let mut structs = HashMap::new();
-        while let Some(maybe_pair) = struct_futures.next().await {
-            let (ast_struct, struct_definition) = maybe_pair?;
-            structs.insert(ast_struct, struct_definition);
+        for top_level in ast.top_levels() {
+            match *top_level {
+                ast::TopLevel::Struct(ast_struct) => {
+                    let struct_ = ast.get_node(ast_struct);
+                    let mut fields = HashMap::new();
+                    for &ast_field in ast.get_list(struct_.fields) {
+                        let field = ast.get_node(ast_field);
+                        let field_type = resolver.resolve_type(NamespaceRef::Module(source_id), ast, field.ty)?;
+                        fields.insert(field.name, field_type); // todo check no duplicates
+                    }
+                    structs.insert(ast_struct, StructDefinition { fields }); // todo check no duplicates
+                }
+                ast::TopLevel::Import(_) => (),
+                ast::TopLevel::Function(_) => (),
+            }
         }
 
-        Ok(DefinedTypes { structs })
+        Ok(DefinedTypes { dependencies: all_dependencies.keys().copied().collect(), structs })
     }
 }
