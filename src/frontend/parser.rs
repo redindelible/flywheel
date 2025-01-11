@@ -1,10 +1,13 @@
 use std::collections::HashSet;
+
 use triomphe::Arc;
-use crate::frontend::{ast::{self, FileAST, ASTBuilder, AstRef}, lexer::Lexer, source::Location, token::{Token, TokenType}, CompileResult, StringsTable};
-use crate::frontend::ast::AstListRef;
+
+use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
 use crate::frontend::error::CompileError;
-use crate::frontend::source::Source;
-use crate::frontend::token::TokenStream;
+use crate::frontend::lexer::Lexer;
+use crate::frontend::source::{Location, Source};
+use crate::frontend::token::{Token, TokenStream, TokenType};
+use crate::frontend::{CompileResult, StringsTable};
 
 pub fn parse(context: Arc<StringsTable>, source: &Source) -> CompileResult<Arc<FileAST>> {
     let maybe_ast = FileAST::new(source.id(), context, |context, builder| {
@@ -12,7 +15,7 @@ pub fn parse(context: Arc<StringsTable>, source: &Source) -> CompileResult<Arc<F
         let mut parser = Parser::new(lexer, builder);
         match parser.parse_file() {
             Ok(top_levels) => Ok(top_levels),
-            Err(_) => Err(parser.error.unwrap())
+            Err(_) => Err(parser.error.unwrap()),
         }
     });
     Ok(Arc::new(maybe_ast?))
@@ -32,7 +35,12 @@ fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileError 
             format!("Got {}, expected {} or {}.", actual.ty.name(), item_a.name(), item_b.name())
         }
         [items @ .., last] => {
-            format!("Got {}, expected any of {}, or {}.", actual.ty.name(), items.iter().map(TokenType::name).collect::<Vec<_>>().join(", "), last.name())
+            format!(
+                "Got {}, expected any of {}, or {}.",
+                actual.ty.name(),
+                items.iter().map(TokenType::name).collect::<Vec<_>>().join(", "),
+                last.name()
+            )
         }
     };
     CompileError::with_description_and_location("parse/expected-any-of", description, actual.loc)
@@ -44,11 +52,11 @@ struct Parser<'ast, L> {
     token_stream: L,
     last: Option<Token>,
     curr: Option<Token>,
-    
+
     ast: &'ast mut ASTBuilder,
 
     possible_tokens: HashSet<TokenType>,
-    error: Option<CompileError>
+    error: Option<CompileError>,
 }
 
 impl<'ast, L: TokenStream> Parser<'ast, L> {
@@ -69,14 +77,14 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
 
     fn curr_is_ty(&mut self, ty: TokenType) -> bool {
         self.possible_tokens.insert(ty);
-        let curr_ty = self.curr.map_or(TokenType::EOF, |token| token.ty);
+        let curr_ty = self.curr.map_or(TokenType::Eof, |token| token.ty);
         curr_ty == ty
     }
-    
+
     fn last_was_ty(&mut self, ty: TokenType) -> bool {
         self.last.is_some_and(|token| token.ty == ty)
     }
-    
+
     fn error<T>(&mut self, error: CompileError) -> ParseResult<T> {
         self.error = Some(error);
         Err(0)
@@ -98,16 +106,16 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             self.error_expected_none()
         }
     }
-    
+
     fn parse_file(&mut self) -> ParseResult<AstListRef<ast::TopLevel>> {
         let mut top_levels = vec![];
-        while !self.curr_is_ty(TokenType::EOF) {
+        while !self.curr_is_ty(TokenType::Eof) {
             top_levels.push(self.parse_top_level()?);
         }
         let top_levels = self.ast.new_list(top_levels);
         Ok(top_levels)
     }
-    
+
     fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel> {
         if self.curr_is_ty(TokenType::Struct) {
             Ok(ast::TopLevel::Struct(self.parse_struct()?))
@@ -119,7 +127,7 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             self.error_expected_none()
         }
     }
-    
+
     fn parse_import(&mut self) -> ParseResult<AstRef<ast::Import>> {
         let start = self.expect(TokenType::Import)?;
         let path = self.expect(TokenType::String)?.text.unwrap();
@@ -176,7 +184,7 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
                 let stmt = self.ast.new_node(ast::Stmt::Expr(expr), location);
                 stmts.push(stmt);
             }
-            
+
             let maybe_stmt = self.parse_stmt()?;
             if let Some(stmt) = maybe_stmt {
                 stmts.push(stmt);
@@ -208,11 +216,8 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             let start = self.expect(TokenType::While)?;
             let condition = self.parse_expr()?;
             let body = self.parse_block()?;
-            let end = if self.curr_is_ty(TokenType::Semicolon) {
-                self.advance().loc
-            } else {
-                self.ast.get_location(body)
-            };
+            let end =
+                if self.curr_is_ty(TokenType::Semicolon) { self.advance().loc } else { self.ast.get_location(body) };
             Ok(Some(self.ast.new_node(ast::Stmt::While { condition, body }, start.loc.combine(end))))
         } else if self.curr_is_ty(TokenType::Return) {
             let start = self.expect(TokenType::Return)?;
@@ -236,14 +241,14 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             } else if self.curr_is_ty(TokenType::Minus) {
                 ast::BinaryOp::Sub
             } else {
-                break
+                break;
             };
 
             self.advance();
             let right = self.parse_expr()?;
             left = self.ast.new_node(
                 ast::Expr::Binary { op, left, right },
-                self.ast.get_location(left).combine(self.ast.get_location(right))
+                self.ast.get_location(left).combine(self.ast.get_location(right)),
             )
         }
         Ok(left)
@@ -251,9 +256,9 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
 
     fn parse_expr_mul(&mut self) -> ParseResult<AstRef<ast::Expr>> {
         let left = self.parse_expr_call()?;
-        loop {
-            break
-        }
+        // loop {
+        //     break;
+        // }
         Ok(left)
     }
 
@@ -264,11 +269,8 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
                 self.advance();
                 let attr = self.expect(TokenType::Identifier)?;
                 left = self.ast.new_node(
-                    ast::Expr::Attr {
-                        object: left,
-                        name: attr.text.unwrap()
-                    },
-                    self.ast.get_location(left).combine(attr.loc)
+                    ast::Expr::Attr { object: left, name: attr.text.unwrap() },
+                    self.ast.get_location(left).combine(attr.loc),
                 );
             } else if self.curr_is_ty(TokenType::LeftParenthesis) {
                 self.advance();
@@ -285,14 +287,11 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
 
                 let arguments = self.ast.new_list(arguments);
                 left = self.ast.new_node(
-                    ast::Expr::Call {
-                        callee: left,
-                        arguments
-                    },
-                    self.ast.get_location(left).combine(end.loc)
+                    ast::Expr::Call { callee: left, arguments },
+                    self.ast.get_location(left).combine(end.loc),
                 );
             } else {
-                break
+                break;
             }
         }
         Ok(left)
@@ -347,10 +346,10 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
+
     use crate::frontend::FrontendDriver;
 
     fn render_ast(text: String, name: String) -> String {
@@ -358,10 +357,9 @@ mod test {
         let handle = driver.handle();
         let source = handle.add_string_source(name, text);
         let ast = driver.block_on(handle.query_ast(source)).unwrap();
-        let pretty = ast.pretty(2);
-        pretty
+        ast.pretty(2)
     }
-    
+
     macro_rules! run_ast_test {
         ($s:literal) => {{
             let source = include_str!(concat!("../../test/", $s));

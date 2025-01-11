@@ -7,7 +7,7 @@ use super::{KeyData, KeyMapKey};
 #[derive(Clone)]
 pub struct ReservableMap<K: KeyMapKey, T> {
     items: Vec<Option<T>>,
-    _phantom: PhantomData<K>
+    _phantom: PhantomData<K>,
 }
 
 impl<K: KeyMapKey, T> ReservableMap<K, T> {
@@ -18,7 +18,7 @@ impl<K: KeyMapKey, T> ReservableMap<K, T> {
     pub fn add(&mut self, value: T) -> K {
         self.add_with(|_| value)
     }
-    
+
     pub fn add_with(&mut self, generator: impl FnOnce(K) -> T) -> K {
         let index = self.items.len();
         let key = K::from(KeyData(NonZero::new(index as u32 + 1).unwrap()));
@@ -46,23 +46,23 @@ impl<K: KeyMapKey, T> ReservableMap<K, T> {
     }
 
     pub fn get(&self, key: K) -> Option<&T> {
-        self.items.get(key.data().0.get() as usize - 1).map(Option::as_ref).flatten()
+        self.items.get(key.data().0.get() as usize - 1).and_then(Option::as_ref)
     }
 
-    pub fn values(&self) -> impl Iterator<Item=&T> {
+    pub fn values(&self) -> impl Iterator<Item = &T> {
         self.items.iter().filter_map(|item| item.as_ref())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=(K, &T)> {
-        self.items.iter()
-            .enumerate()
-            .filter_map(|(index, item)| item.as_ref().map(|item| (K::from(KeyData(NonZero::new(index as u32 + 1).unwrap())), item)))
+    pub fn iter(&self) -> impl Iterator<Item = (K, &T)> {
+        self.items.iter().enumerate().filter_map(|(index, item)| {
+            item.as_ref().map(|item| (K::from(KeyData(NonZero::new(index as u32 + 1).unwrap())), item))
+        })
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item=(K, &mut T)> {
-        self.items.iter_mut()
-            .enumerate()
-            .filter_map(|(index, item)| item.as_mut().map(|item| (K::from(KeyData(NonZero::new(index as u32 + 1).unwrap())), item)))
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut T)> {
+        self.items.iter_mut().enumerate().filter_map(|(index, item)| {
+            item.as_mut().map(|item| (K::from(KeyData(NonZero::new(index as u32 + 1).unwrap())), item))
+        })
     }
 }
 

@@ -1,14 +1,12 @@
-use crate::frontend::{InternedString, StringsTable};
 use crate::frontend::source::{Location, SourceID};
-
+use crate::frontend::{InternedString, StringsTable};
 
 pub(super) trait TokenStream {
     fn next(&mut self) -> Option<Token>;
-    
+
     fn source_id(&self) -> SourceID;
     fn strings(&self) -> &StringsTable;
 }
-
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Token {
@@ -21,17 +19,17 @@ pub struct Token {
 impl Token {
     pub const fn new_eof(source: SourceID) -> Token {
         Token {
-            ty: TokenType::EOF,
+            ty: TokenType::Eof,
             text: None,
             has_leading_whitespace: true,
-            loc: Location { source, offset: u32::MAX, length: 1 }
+            loc: Location { source, offset: u32::MAX, length: 1 },
         }
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum TokenType {
-    EOF,
+    Eof,
     Error,
 
     String,
@@ -85,10 +83,10 @@ impl TokenType {
             (TokenType::Return, "return"),
         ]
     }
-    
+
     pub const fn name(&self) -> &'static str {
         match self {
-            TokenType::EOF => "the end of input",
+            TokenType::Eof => "the end of input",
             TokenType::Error => "an unexpected character",
             TokenType::String => "a string literal",
             TokenType::Integer => "a decimal number",

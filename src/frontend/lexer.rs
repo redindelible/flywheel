@@ -1,14 +1,13 @@
-use regex_automata::{Input, meta::Regex, Anchored, Span};
+use regex_automata::meta::Regex;
+use regex_automata::{Anchored, Input, Span};
 
-use crate::frontend::{
-    StringsTable,
-    source::{Location, SourceID},
-    token::{Token, TokenType, TokenStream}
-};
+use crate::frontend::StringsTable;
+use crate::frontend::source::{Location, SourceID};
+use crate::frontend::token::{Token, TokenStream, TokenType};
 
 #[derive(Debug)]
 pub struct LexerError {
-    loc: Location
+    loc: Location,
 }
 
 enum PatternType {
@@ -16,10 +15,10 @@ enum PatternType {
     Comment,
     String,
     Interned(TokenType),
-    Basic(TokenType)
+    Basic(TokenType),
 }
 
-const PATTERNS: &'static [(&'static str, PatternType)] = &[
+const PATTERNS: &[(&str, PatternType)] = &[
     (r"[ \t\r\n]+", PatternType::Whitespace),
     (r"#[^\n]+", PatternType::Comment),
     (r"[_\p{ID_Start}][_\p{ID_Continue}]*", PatternType::Interned(TokenType::Identifier)),
@@ -51,7 +50,7 @@ const PATTERNS: &'static [(&'static str, PatternType)] = &[
 
 #[derive(Clone)]
 pub(super) struct LexerShared {
-    regex: Regex
+    regex: Regex,
 }
 
 impl LexerShared {
@@ -67,30 +66,27 @@ pub(super) struct Lexer<'a> {
     source_id: SourceID,
     regex: Regex,
     text: &'a str,
-    span: Span
+    span: Span,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(context: &'a StringsTable, source_id: SourceID, text: &'a str) -> Lexer<'a> {
         let span = Input::new(text).get_span();
 
-        Lexer {
-            context,
-            source_id,
-            regex: context.lexer_shared.regex.clone(),
-            text, 
-            span,
-        }
+        Lexer { context, source_id, regex: context.lexer_shared.regex.clone(), text, span }
     }
-    
+
     fn lex_next(&mut self) -> Option<Token> {
         self.try_lex_next().map(|maybe_token| {
-            maybe_token.unwrap_or_else(|error| {
-                Token { ty: TokenType::Error, text: None, has_leading_whitespace: false, loc: error.loc }
+            maybe_token.unwrap_or_else(|error| Token {
+                ty: TokenType::Error,
+                text: None,
+                has_leading_whitespace: false,
+                loc: error.loc,
             })
         })
     }
-    
+
     fn try_lex_next(&mut self) -> Option<Result<Token, LexerError>> {
         let mut input = Input::new(self.text).anchored(Anchored::Yes);
         input.set_span(self.span);
@@ -99,39 +95,47 @@ impl<'a> Lexer<'a> {
         while input.start() < input.haystack().len() {
             if let Some(match_) = self.regex.search(&input) {
                 let str = &self.text[match_.range()];
-                let loc = Location { source: self.source_id, offset: input.start() as u32, length: match_.len() as u32 };
+                let loc =
+                    Location { source: self.source_id, offset: input.start() as u32, length: match_.len() as u32 };
                 input.set_start(match_.end());
 
                 match PATTERNS[match_.pattern().as_usize()].1 {
                     PatternType::Whitespace | PatternType::Comment => {
                         has_leading_whitespace = true;
-                    },
+                    }
                     PatternType::String => {
-                        let symbol = self.context.get_or_intern(&str[1..str.len()-1]);
+                        let symbol = self.context.get_or_intern(&str[1..str.len() - 1]);
                         self.span = input.get_span();
-                        return Some(Ok(Token { ty: TokenType::String, text: Some(symbol), has_leading_whitespace, loc }));
+                        return Some(Ok(Token {
+                            ty: TokenType::String,
+                            text: Some(symbol),
+                            has_leading_whitespace,
+                            loc,
+                        }));
                     }
                     PatternType::Interned(ty_fn) => {
                         let symbol = self.context.get_or_intern(str);
                         let ty = self.context.try_get_keyword(symbol).unwrap_or(ty_fn);
                         self.span = input.get_span();
                         return Some(Ok(Token { ty, text: Some(symbol), has_leading_whitespace, loc }));
-                    },
+                    }
                     PatternType::Basic(ty) => {
                         self.span = input.get_span();
                         return Some(Ok(Token { ty, text: None, has_leading_whitespace, loc }));
                     }
                 }
             } else {
-                return Some(Err(LexerError { loc: Location { source: self.source_id, offset: input.start() as u32, length: 1 } }));
+                return Some(Err(LexerError {
+                    loc: Location { source: self.source_id, offset: input.start() as u32, length: 1 },
+                }));
             }
         }
-        
+
         None
     }
 }
 
-impl<'a> TokenStream for Lexer<'a> {
+impl TokenStream for Lexer<'_> {
     fn next(&mut self) -> Option<Token> {
         self.lex_next()
     }

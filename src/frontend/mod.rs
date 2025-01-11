@@ -1,35 +1,36 @@
 pub mod ast;
-mod parser;
-mod lexer;
-mod token;
-mod source;
 mod error;
+mod lexer;
+mod parser;
+mod source;
+mod token;
 mod type_check;
 
 use std::collections::HashMap;
 use std::future::Future;
-use triomphe::{Arc, ArcBorrow};
-use camino::{Utf8Path, Utf8PathBuf};
-use futures_util::FutureExt;
-use tokio::runtime::Runtime;
-use crate::utils::{Interner, InternedString, OnceMap, ReservableMap};
 
-use token::TokenType;
 use ast::FileAST;
+use camino::{Utf8Path, Utf8PathBuf};
 pub use error::CompileError;
+use futures_util::FutureExt;
 use lexer::LexerShared;
 pub use source::{Source, SourceID};
+use token::TokenType;
+use tokio::runtime::Runtime;
+use triomphe::{Arc, ArcBorrow};
+
 use crate::frontend::type_check::{DeclaredNames, DefinedTypes, TypeCheckerShared};
+use crate::utils::{InternedString, Interner, OnceMap, ReservableMap};
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
 pub struct FrontendDriver {
-    inner: Arc<Inner>
+    inner: Arc<Inner>,
 }
 
 #[derive(Clone)]
 pub struct Handle {
-    inner: Arc<Inner>
+    inner: Arc<Inner>,
 }
 
 struct Inner {
@@ -42,7 +43,7 @@ struct Inner {
     files: OnceMap<Utf8PathBuf, CompileResult<SourceID>>,
     asts: OnceMap<SourceID, CompileResult<Arc<FileAST>>>,
     declared_types: OnceMap<SourceID, CompileResult<Arc<DeclaredNames>>>,
-    defined_types: OnceMap<SourceID, CompileResult<Arc<DefinedTypes>>>
+    defined_types: OnceMap<SourceID, CompileResult<Arc<DefinedTypes>>>,
 }
 
 impl FrontendDriver {
@@ -51,7 +52,7 @@ impl FrontendDriver {
 
         let strings = Arc::new(StringsTable::new());
         let type_checker_shared = TypeCheckerShared::new(&strings);
-        
+
         FrontendDriver {
             inner: Arc::new(Inner {
                 runtime,
@@ -62,10 +63,10 @@ impl FrontendDriver {
                 asts: OnceMap::new(),
                 declared_types: OnceMap::new(),
                 defined_types: OnceMap::new(),
-            })
+            }),
         }
     }
-    
+
     pub fn handle(&self) -> Handle {
         Handle { inner: Arc::clone(&self.inner) }
     }
@@ -79,7 +80,7 @@ impl Handle {
     pub fn strings(&self) -> &StringsTable {
         &self.inner.strings
     }
-    
+
     pub fn type_checker_shared(&self) -> &TypeCheckerShared {
         &self.inner.type_checker_shared
     }
@@ -88,34 +89,61 @@ impl Handle {
         self.inner.sources.read().get(source_id).cloned()
     }
 
-    pub async fn query_relative_source(&self, anchor: SourceID, relative_path: impl AsRef<Utf8Path>) -> CompileResult<SourceID> {
+    pub async fn query_relative_source(
+        &self,
+        anchor: SourceID,
+        relative_path: impl AsRef<Utf8Path>,
+    ) -> CompileResult<SourceID> {
         let anchor_source = self.get_source(anchor).unwrap();
         let Some(anchor_path) = anchor_source.absolute_path() else { todo!() };
 
         let new_path = anchor_path.parent().unwrap().join(relative_path.as_ref());
         let Ok(normalized_path) = normpath::PathExt::normalize(new_path.as_std_path()) else {
-            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &new_path),
+            ));
         };
         let Ok(utf8_path) = Utf8PathBuf::from_path_buf(normalized_path.into_path_buf()) else {
-            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &new_path)));
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &new_path),
+            ));
         };
         self.query_file_source(utf8_path).await
     }
 
     pub async fn query_file_source(&self, path: Utf8PathBuf) -> CompileResult<SourceID> {
         let Ok(absolute_path) = camino::absolute_utf8(&path) else {
-            return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
+            return Err(CompileError::with_description(
+                "fs/could-not-open-file",
+                format!("Could not open the file '{}'.", &path),
+            ));
         };
-        self.inner.files.get_or_init(absolute_path.clone(), || {
-            let handle = self.clone();
-            self.inner.runtime.spawn(async move {
-                let Ok(text) = tokio::fs::read_to_string(&absolute_path).await else {
-                    return Err(CompileError::with_description("fs/could-not-open-file", format!("Could not open the file '{}'.", &path)));
-                };
-                let source_id = handle.inner.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
-                Ok(source_id)
-            }).map(Result::unwrap)
-        }).await.clone()
+        self.inner
+            .files
+            .get_or_init(absolute_path.clone(), || {
+                let handle = self.clone();
+                self.inner
+                    .runtime
+                    .spawn(async move {
+                        let Ok(text) = tokio::fs::read_to_string(&absolute_path).await else {
+                            return Err(CompileError::with_description(
+                                "fs/could-not-open-file",
+                                format!("Could not open the file '{}'.", &path),
+                            ));
+                        };
+                        let source_id = handle
+                            .inner
+                            .sources
+                            .write()
+                            .add_with(|id| Arc::new(Source::new(id, absolute_path, path.as_str().into(), text)));
+                        Ok(source_id)
+                    })
+                    .map(Result::unwrap)
+            })
+            .await
+            .clone()
     }
 
     #[allow(dead_code)]
@@ -124,35 +152,57 @@ impl Handle {
     }
 
     pub async fn query_ast(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, FileAST>> {
-        self.inner.asts.get_or_init(source_id, || {
-            let handle = self.clone();
-            self.inner.runtime.spawn(async move {
-                let source = handle.get_source(source_id).unwrap();
-                let string_table = Arc::clone(&handle.inner.strings);
-                parser::parse(string_table, &source)
-            }).map(Result::unwrap)
-        }).await.as_ref().map(|o| o.borrow_arc()).map_err(|e| e.clone())
+        self.inner
+            .asts
+            .get_or_init(source_id, || {
+                let handle = self.clone();
+                self.inner
+                    .runtime
+                    .spawn(async move {
+                        let source = handle.get_source(source_id).unwrap();
+                        let string_table = Arc::clone(&handle.inner.strings);
+                        parser::parse(string_table, &source)
+                    })
+                    .map(Result::unwrap)
+            })
+            .await
+            .as_ref()
+            .map(|o| o.borrow_arc())
+            .map_err(|e| e.clone())
     }
 
     pub async fn query_declared_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DeclaredNames>> {
-        self.inner.declared_types.get_or_init(source_id, || {
-            let handle = self.clone();
-            self.inner.runtime.spawn(async move {
-                DeclaredNames::process(&handle, source_id).await.map(Arc::new)
-            }).map(Result::unwrap)
-        }).await.as_ref().map(Arc::borrow_arc).map_err(Clone::clone)
+        self.inner
+            .declared_types
+            .get_or_init(source_id, || {
+                let handle = self.clone();
+                self.inner
+                    .runtime
+                    .spawn(async move { DeclaredNames::process(&handle, source_id).await.map(Arc::new) })
+                    .map(Result::unwrap)
+            })
+            .await
+            .as_ref()
+            .map(Arc::borrow_arc)
+            .map_err(Clone::clone)
     }
-    
+
     pub async fn query_defined_types(&self, source_id: SourceID) -> CompileResult<ArcBorrow<'_, DefinedTypes>> {
-        self.inner.defined_types.get_or_init(source_id, || {
-            let handle = self.clone();
-            self.inner.runtime.spawn(async move {
-                DefinedTypes::process(&handle, source_id).await.map(Arc::new)
-            }).map(Result::unwrap)
-        }).await.as_ref().map(Arc::borrow_arc).map_err(Clone::clone)
+        self.inner
+            .defined_types
+            .get_or_init(source_id, || {
+                let handle = self.clone();
+                self.inner
+                    .runtime
+                    .spawn(async move { DefinedTypes::process(&handle, source_id).await.map(Arc::new) })
+                    .map(Result::unwrap)
+            })
+            .await
+            .as_ref()
+            .map(Arc::borrow_arc)
+            .map_err(Clone::clone)
     }
 }
-
 
 pub struct StringsTable {
     symbols: Interner,
@@ -164,7 +214,9 @@ impl StringsTable {
     fn new() -> Self {
         let symbols = Interner::new();
         Self {
-            keywords: HashMap::from_iter(TokenType::keywords().into_iter().map(|&(ty, text)| (symbols.get_or_intern_static(text), ty))),
+            keywords: HashMap::from_iter(
+                TokenType::keywords().iter().map(|&(ty, text)| (symbols.get_or_intern_static(text), ty)),
+            ),
             symbols,
             lexer_shared: LexerShared::new(),
         }
@@ -182,4 +234,3 @@ impl StringsTable {
         self.keywords.get(&symbol).copied()
     }
 }
-

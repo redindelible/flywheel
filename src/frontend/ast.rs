@@ -1,22 +1,25 @@
+#![allow(dead_code)]
+
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use triomphe::Arc;
-use bumpalo::Bump;
-use crate::frontend::{InternedString, SourceID, StringsTable};
-use crate::frontend::source::Location;
 
+use bumpalo::Bump;
+use triomphe::Arc;
+
+use crate::frontend::source::Location;
+use crate::frontend::{InternedString, SourceID, StringsTable};
 
 pub struct AstRef<T>(u32, PhantomData<T>);
 
 impl<T> Clone for AstRef<T> {
     #[inline]
     fn clone(&self) -> Self {
-        AstRef(self.0, self.1)
+        *self
     }
 }
 
-impl<T> Copy for AstRef<T> { }
+impl<T> Copy for AstRef<T> {}
 
 impl<T> Hash for AstRef<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -30,18 +33,18 @@ impl<T> PartialEq for AstRef<T> {
     }
 }
 
-impl<T> Eq for AstRef<T> { }
+impl<T> Eq for AstRef<T> {}
 
 pub struct AstListRef<T>(u32, PhantomData<T>);
 
 impl<T> Clone for AstListRef<T> {
     #[inline]
     fn clone(&self) -> Self {
-        AstListRef(self.0, self.1)
+        *self
     }
 }
 
-impl<T> Copy for AstListRef<T> { }
+impl<T> Copy for AstListRef<T> {}
 
 impl<T> AstRef<T> {
     #[inline(always)]
@@ -59,25 +62,32 @@ pub struct FileAST {
     locations: Vec<Location>,
     lists: Vec<(usize, NonNull<()>)>,
 
-    top_levels: AstListRef<TopLevel>
+    top_levels: AstListRef<TopLevel>,
 }
 
 impl FileAST {
-    pub(super) fn new<F, E>(source_id: SourceID, strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E> where F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E> {
-        let mut allocator = ASTBuilder {
-            arena: Bump::new(),
-            nodes: Vec::new(),
-            locations: Vec::new(),
-            lists: Vec::new()
-        };
+    pub(super) fn new<F, E>(source_id: SourceID, strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E>
+    where
+        F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E>,
+    {
+        let mut allocator =
+            ASTBuilder { arena: Bump::new(), nodes: Vec::new(), locations: Vec::new(), lists: Vec::new() };
         let top_levels = try_build(&strings, &mut allocator)?;
-        Ok(FileAST { source_id, strings, _arena: allocator.arena, nodes: allocator.nodes, locations: allocator.locations, lists: allocator.lists, top_levels })
+        Ok(FileAST {
+            source_id,
+            strings,
+            _arena: allocator.arena,
+            nodes: allocator.nodes,
+            locations: allocator.locations,
+            lists: allocator.lists,
+            top_levels,
+        })
     }
 
     pub fn resolve(&self, interned: InternedString) -> String {
         self.strings.resolve(interned).unwrap().to_owned()
     }
-    
+
     pub fn source(&self) -> SourceID {
         self.source_id
     }
@@ -85,12 +95,12 @@ impl FileAST {
     pub fn get_location<T>(&self, node: AstRef<T>) -> Location {
         self.locations[node.as_usize()]
     }
-    
+
     pub fn get_node<T>(&self, node: AstRef<T>) -> &T {
         let ptr = self.nodes[node.as_usize()];
         unsafe { ptr.cast::<T>().as_ref() }
     }
-    
+
     pub fn get_list<T>(&self, list: AstListRef<T>) -> &[T] {
         let (length, ptr) = self.lists[list.0 as usize];
         unsafe { std::slice::from_raw_parts(ptr.cast::<T>().as_ptr(), length) }
@@ -106,8 +116,8 @@ impl FileAST {
     }
 }
 
-unsafe impl Sync for FileAST { }
-unsafe impl Send for FileAST { }
+unsafe impl Sync for FileAST {}
+unsafe impl Send for FileAST {}
 
 fn index_to_ref<T, O>(ref_fn: fn(u32, PhantomData<T>) -> O, index: usize) -> O {
     ref_fn(index.try_into().unwrap(), PhantomData)
@@ -117,22 +127,26 @@ pub(super) struct ASTBuilder {
     arena: Bump,
     nodes: Vec<NonNull<()>>,
     locations: Vec<Location>,
-    lists: Vec<(usize, NonNull<()>)>
+    lists: Vec<(usize, NonNull<()>)>,
 }
 
 impl ASTBuilder {
     pub fn get_location<T>(&self, node: AstRef<T>) -> Location {
         self.locations[node.as_usize()]
     }
-    
-    pub fn new_list<I, T>(&mut self, items: I) -> AstListRef<T> where I: IntoIterator<Item=T>, I::IntoIter: ExactSizeIterator {
+
+    pub fn new_list<I, T>(&mut self, items: I) -> AstListRef<T>
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
         let items = self.arena.alloc_slice_fill_iter(items);
         let index = index_to_ref(AstListRef, self.lists.len());
         self.lists.push((items.len(), NonNull::new(items.as_mut_ptr()).unwrap().cast()));
         index
     }
-    
-    pub fn new_node<T>(&mut self, node: T, location: Location) -> AstRef<T> { 
+
+    pub fn new_node<T>(&mut self, node: T, location: Location) -> AstRef<T> {
         let item = self.arena.alloc(node);
         let index = index_to_ref(AstRef, self.nodes.len());
         self.nodes.push(NonNull::from(item).cast());
@@ -144,22 +158,22 @@ impl ASTBuilder {
 pub enum TopLevel {
     Function(AstRef<Function>),
     Struct(AstRef<Struct>),
-    Import(AstRef<Import>)
+    Import(AstRef<Import>),
 }
 
 pub struct Function {
     pub name: InternedString,
     pub return_type: AstRef<Type>,
-    pub body: AstRef<Block>
+    pub body: AstRef<Block>,
 }
 
 pub struct Struct {
     pub name: InternedString,
-    pub fields: AstListRef<AstRef<StructField>>
+    pub fields: AstListRef<AstRef<StructField>>,
 }
 
 pub struct Import {
-    pub relative_path: InternedString
+    pub relative_path: InternedString,
 }
 
 pub struct StructField {
@@ -173,17 +187,10 @@ pub struct Block {
 }
 
 pub enum Stmt {
-    Let {
-        name: InternedString,
-        ty: Option<AstRef<Type>>,
-        value: AstRef<Expr>,
-    },
-    While {
-        condition: AstRef<Expr>,
-        body: AstRef<Block>
-    },
+    Let { name: InternedString, ty: Option<AstRef<Type>>, value: AstRef<Expr> },
+    While { condition: AstRef<Expr>, body: AstRef<Block> },
     Return(AstRef<Expr>),
-    Expr(AstRef<Expr>)
+    Expr(AstRef<Expr>),
 }
 
 pub enum Expr {
@@ -193,44 +200,24 @@ pub enum Expr {
     String(InternedString),
     Name(InternedString),
     Block(AstRef<Block>),
-    Attr {
-        object: AstRef<Expr>,
-        name: InternedString
-    },
-    Index {
-        object: AstRef<Expr>,
-        index: AstRef<Expr>
-    },
-    Unary {
-        op: UnaryOp,
-        right: AstRef<Expr>
-    },
-    Binary {
-        op: BinaryOp,
-        left: AstRef<Expr>,
-        right: AstRef<Expr>
-    },
-    IfElse {
-        condition: AstRef<Expr>,
-        then_do: AstRef<Expr>,
-        else_do: Option<AstRef<Expr>>,
-    },
-    Call {
-        callee: AstRef<Expr>,
-        arguments: AstListRef<AstRef<Expr>>,
-    },
+    Attr { object: AstRef<Expr>, name: InternedString },
+    Index { object: AstRef<Expr>, index: AstRef<Expr> },
+    Unary { op: UnaryOp, right: AstRef<Expr> },
+    Binary { op: BinaryOp, left: AstRef<Expr>, right: AstRef<Expr> },
+    IfElse { condition: AstRef<Expr>, then_do: AstRef<Expr>, else_do: Option<AstRef<Expr>> },
+    Call { callee: AstRef<Expr>, arguments: AstListRef<AstRef<Expr>> },
 }
 
 pub enum UnaryOp {
     Not,
-    Neg
+    Neg,
 }
 
 impl UnaryOp {
     pub fn name(&self) -> &'static str {
         match self {
             UnaryOp::Not => "Not",
-            UnaryOp::Neg => "Neg"
+            UnaryOp::Neg => "Neg",
         }
     }
 }
@@ -240,7 +227,7 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
-    Mod
+    Mod,
 }
 
 impl BinaryOp {
@@ -250,54 +237,51 @@ impl BinaryOp {
             BinaryOp::Sub => "Sub",
             BinaryOp::Mul => "Mul",
             BinaryOp::Div => "Div",
-            BinaryOp::Mod => "Mod"
+            BinaryOp::Mod => "Mod",
         }
     }
 }
 
 pub enum Type {
-    Name(InternedString)
+    Name(InternedString),
 }
 
 enum PrettyNode {
-    StructBranch {
-        name: String,
-        children: Vec<(String, PrettyNode)>
-    },
-    TupleStructBranch {
-        name: String,
-        children: Vec<PrettyNode>
-    },
+    StructBranch { name: String, children: Vec<(String, PrettyNode)> },
+    TupleStructBranch { name: String, children: Vec<PrettyNode> },
     ListBranch { children: Vec<PrettyNode> },
-    Leaf(String)
+    Leaf(String),
 }
 
 impl PrettyNode {
-    fn from_struct<S>(name: impl Into<String>, children: impl IntoIterator<Item=(S, PrettyNode)>) -> PrettyNode where S: Into<String> {
+    fn from_struct<S>(name: impl Into<String>, children: impl IntoIterator<Item = (S, PrettyNode)>) -> PrettyNode
+    where
+        S: Into<String>,
+    {
         let name = name.into();
         let children = children.into_iter().map(|(s, n)| (s.into(), n)).collect();
         PrettyNode::StructBranch { name, children }
     }
-    
-    fn from_tuple_struct(name: impl Into<String>, children: impl IntoIterator<Item=PrettyNode>) -> PrettyNode {
+
+    fn from_tuple_struct(name: impl Into<String>, children: impl IntoIterator<Item = PrettyNode>) -> PrettyNode {
         PrettyNode::TupleStructBranch { name: name.into(), children: children.into_iter().collect() }
     }
-    
-    fn from_list(items: impl IntoIterator<Item=PrettyNode>) -> PrettyNode {
+
+    fn from_list(items: impl IntoIterator<Item = PrettyNode>) -> PrettyNode {
         PrettyNode::ListBranch { children: items.into_iter().collect() }
     }
-    
+
     fn from_option(maybe: Option<PrettyNode>) -> PrettyNode {
         match maybe {
             Some(node) => PrettyNode::from_tuple_struct("Some", [node]),
-            None => PrettyNode::from_string("None")
+            None => PrettyNode::from_string("None"),
         }
     }
-    
+
     fn from_string(text: impl Into<String>) -> PrettyNode {
         PrettyNode::Leaf(text.into())
     }
-    
+
     fn from_location(location: Location) -> PrettyNode {
         PrettyNode::from_string(format!("{location:?}"))
     }
@@ -326,7 +310,7 @@ impl Pretty for Function {
             ("name", name),
             ("return_type", return_type),
             ("body", body),
-            ("location", PrettyNode::from_location(location))
+            ("location", PrettyNode::from_location(location)),
         ])
     }
 }
@@ -338,17 +322,18 @@ impl Pretty for Struct {
         PrettyNode::from_struct("Struct", [
             ("name", name),
             ("fields", fields),
-            ("location", PrettyNode::from_location(location))
+            ("location", PrettyNode::from_location(location)),
         ])
     }
 }
 
 impl Pretty for Import {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
-        let relative_path = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.relative_path).unwrap()));
+        let relative_path =
+            PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.relative_path).unwrap()));
         PrettyNode::from_struct("Import", [
             ("relative_path", relative_path),
-            ("location", PrettyNode::from_location(location))
+            ("location", PrettyNode::from_location(location)),
         ])
     }
 }
@@ -360,7 +345,7 @@ impl Pretty for StructField {
         PrettyNode::from_struct("Field", [
             ("name", name),
             ("ty", ty),
-            ("location", PrettyNode::from_location(location))
+            ("location", PrettyNode::from_location(location)),
         ])
     }
 }
@@ -369,11 +354,11 @@ impl Pretty for Block {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         let stmts = PrettyNode::from_list(context.get_list(self.stmts).iter().map(|stmt| context.to_tree(*stmt)));
         let trailing_expr = PrettyNode::from_option(self.trailing_expr.map(|expr| context.to_tree(expr)));
-        
+
         PrettyNode::from_struct("Block", [
             ("stmts", stmts),
             ("trailing_expr", trailing_expr),
-            ("location", PrettyNode::from_location(location))
+            ("location", PrettyNode::from_location(location)),
         ])
     }
 }
@@ -381,18 +366,14 @@ impl Pretty for Block {
 impl Pretty for Stmt {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
-            Stmt::Return(expr) => {
-                PrettyNode::from_struct("Return", [
-                    ("value", context.to_tree(*expr)),
-                    ("location", PrettyNode::from_location(location))
-                ])
-            }
-            Stmt::Expr(expr) => {
-                PrettyNode::from_struct("Expr", [
-                    ("value", context.to_tree(*expr)),
-                    ("location", PrettyNode::from_location(location))
-                ])
-            }
+            Stmt::Return(expr) => PrettyNode::from_struct("Return", [
+                ("value", context.to_tree(*expr)),
+                ("location", PrettyNode::from_location(location)),
+            ]),
+            Stmt::Expr(expr) => PrettyNode::from_struct("Expr", [
+                ("value", context.to_tree(*expr)),
+                ("location", PrettyNode::from_location(location)),
+            ]),
             Stmt::Let { name, ty, value } => {
                 let text = context.strings.resolve(*name).unwrap();
                 let ty = PrettyNode::from_option(ty.as_ref().map(|ty| context.to_tree(*ty)));
@@ -401,7 +382,7 @@ impl Pretty for Stmt {
                     ("name", PrettyNode::from_string(format!("{:?}", text))),
                     ("ty", ty),
                     ("value", value),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Stmt::While { condition, body } => {
@@ -410,7 +391,7 @@ impl Pretty for Stmt {
                 PrettyNode::from_struct("While", [
                     ("condition", condition),
                     ("body", body),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
         }
@@ -420,36 +401,30 @@ impl Pretty for Stmt {
 impl Pretty for Expr {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
-            Expr::Bool(value) => {
-                PrettyNode::from_struct("Bool", [
-                    ("value", PrettyNode::from_string(format!("{}", value))),
-                    ("location", PrettyNode::from_location(location))
-                ])
-            },
-            Expr::Float(value) => {
-                PrettyNode::from_struct("Float", [
-                    ("value", PrettyNode::from_string(format!("{}", value))),
-                    ("location", PrettyNode::from_location(location))
-                ])
-            },
-            Expr::Integer(value) => {
-                PrettyNode::from_struct("Integer", [
-                    ("value", PrettyNode::from_string(format!("{}", value))),
-                    ("location", PrettyNode::from_location(location))
-                ])
-            },
+            Expr::Bool(value) => PrettyNode::from_struct("Bool", [
+                ("value", PrettyNode::from_string(format!("{}", value))),
+                ("location", PrettyNode::from_location(location)),
+            ]),
+            Expr::Float(value) => PrettyNode::from_struct("Float", [
+                ("value", PrettyNode::from_string(format!("{}", value))),
+                ("location", PrettyNode::from_location(location)),
+            ]),
+            Expr::Integer(value) => PrettyNode::from_struct("Integer", [
+                ("value", PrettyNode::from_string(format!("{}", value))),
+                ("location", PrettyNode::from_location(location)),
+            ]),
             Expr::String(interned) => {
                 let text = context.strings.resolve(*interned).unwrap();
                 PrettyNode::from_struct("String", [
                     ("value", PrettyNode::from_string(format!("{:?}", text))),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Name(interned) => {
                 let text = context.strings.resolve(*interned).unwrap();
                 PrettyNode::from_struct("Name", [
                     ("value", PrettyNode::from_string(format!("{:?}", text))),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Attr { object, name } => {
@@ -458,7 +433,7 @@ impl Pretty for Expr {
                 PrettyNode::from_struct("Attr", [
                     ("object", object),
                     ("name", PrettyNode::from_string(format!("{:?}", name))),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Index { object, index } => {
@@ -467,7 +442,7 @@ impl Pretty for Expr {
                 PrettyNode::from_struct("Index", [
                     ("object", object),
                     ("index", index),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Unary { op, right } => {
@@ -475,7 +450,7 @@ impl Pretty for Expr {
                 PrettyNode::from_struct("Unary", [
                     ("op", PrettyNode::from_string(op.name())),
                     ("right", right),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Binary { left, op, right } => {
@@ -485,7 +460,7 @@ impl Pretty for Expr {
                     ("left", left),
                     ("op", PrettyNode::from_string(op.name())),
                     ("right", right),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Call { callee, arguments } => {
@@ -495,7 +470,7 @@ impl Pretty for Expr {
                 PrettyNode::from_struct("Call", [
                     ("callee", callee),
                     ("arguments", arguments),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Block(block) => context.to_tree(*block),
@@ -507,7 +482,7 @@ impl Pretty for Expr {
                     ("condition", condition),
                     ("then_do", then_do),
                     ("else_do", else_do),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
         }
@@ -521,7 +496,7 @@ impl Pretty for Type {
                 let text = context.strings.resolve(*name).unwrap();
                 PrettyNode::from_struct("Name", [
                     ("name", PrettyNode::from_string(format!("{:?}", &*text))),
-                    ("location", PrettyNode::from_location(location))
+                    ("location", PrettyNode::from_location(location)),
                 ])
             }
         }
@@ -534,12 +509,22 @@ struct PrettyOptions {
 }
 
 impl PrettyNode {
-    fn render_delimited<'a>(start: &str, end: &str, children: impl IntoIterator<Item=(String, &'a PrettyNode)> + 'a, options: &PrettyOptions, line_prefix: &str) -> String {
+    fn render_delimited<'a>(
+        start: &str,
+        end: &str,
+        children: impl IntoIterator<Item = (String, &'a PrettyNode)> + 'a,
+        options: &PrettyOptions,
+        line_prefix: &str,
+    ) -> String {
         let mut output = start.to_string();
         let child_line_prefix = String::from_iter([line_prefix, options.indent.as_str()]);
         let mut is_first = true;
         for (field_prefix, field) in children {
-            if !is_first { output.push(','); } else {  is_first = false; }
+            if !is_first {
+                output.push(',');
+            } else {
+                is_first = false;
+            }
             output.push('\n');
             output.push_str(&child_line_prefix);
             output.push_str(&field_prefix);
@@ -547,55 +532,44 @@ impl PrettyNode {
         }
         output.push('\n');
         output.push_str(line_prefix);
-        output.push_str(end.into());
+        output.push_str(end);
         output
     }
-    
+
     fn render(&self, options: &PrettyOptions, line_prefix: &str) -> String {
         match self {
-            PrettyNode::StructBranch { name, children } => {
-                PrettyNode::render_delimited(
-                    &format!("{} {{", name),
-                    "}",
-                    children.iter().map(|(field_name, field)| {
-                        (format!("{}: ", field_name), field)
-                    }),
-                    options,
-                    line_prefix
-                )
-            }
-            PrettyNode::TupleStructBranch { name, children } => {
-                PrettyNode::render_delimited(
-                    &format!("{} (", name),
-                    ")",
-                    children.iter().map(|field| {
-                        (String::new(), field)
-                    }),
-                    options,
-                    line_prefix
-                )
-            }
-            PrettyNode::ListBranch { children } => {
-                PrettyNode::render_delimited(
-                    "[",
-                    "]",
-                    children.iter().map(|field| {
-                        (String::new(), field)
-                    }),
-                    options,
-                    line_prefix
-                )
-            }
-            PrettyNode::Leaf(text) => text.clone()
+            PrettyNode::StructBranch { name, children } => PrettyNode::render_delimited(
+                &format!("{} {{", name),
+                "}",
+                children.iter().map(|(field_name, field)| (format!("{}: ", field_name), field)),
+                options,
+                line_prefix,
+            ),
+            PrettyNode::TupleStructBranch { name, children } => PrettyNode::render_delimited(
+                &format!("{} (", name),
+                ")",
+                children.iter().map(|field| (String::new(), field)),
+                options,
+                line_prefix,
+            ),
+            PrettyNode::ListBranch { children } => PrettyNode::render_delimited(
+                "[",
+                "]",
+                children.iter().map(|field| (String::new(), field)),
+                options,
+                line_prefix,
+            ),
+            PrettyNode::Leaf(text) => text.clone(),
         }
     }
 }
 
 impl FileAST {
     pub fn pretty(&self, indent: usize) -> String {
-        let tree = PrettyNode::from_struct("File", [
-            ("top_levels", PrettyNode::from_list(self.get_list(self.top_levels).iter().map(|top_level| top_level.to_tree(self))))
-        ]);
-        tree.render(&PrettyOptions { indent: String::from_iter(std::iter::repeat_n(' ', indent)), _max_width: 80}, "")
+        let tree = PrettyNode::from_struct("File", [(
+            "top_levels",
+            PrettyNode::from_list(self.get_list(self.top_levels).iter().map(|top_level| top_level.to_tree(self))),
+        )]);
+        tree.render(&PrettyOptions { indent: String::from_iter(std::iter::repeat_n(' ', indent)), _max_width: 80 }, "")
     }
 }

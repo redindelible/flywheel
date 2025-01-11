@@ -26,4 +26,4 @@ let engine = Engine::new();
 
 let filterer_code = engine.load_module::<Filterer>("path/to/script").unwrap();
 // modules can't be sync since the language isn't thread safe, per-se
-engine.execute(&mut filterer_code.filter_people, )
+engine.execute(&mut filterer_code.filter_people, ..)

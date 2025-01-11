@@ -1,5 +1,6 @@
 use std::mem;
 use std::ptr::NonNull;
+
 use crate::interpreter::gc::GcRef;
 
 /// Stores a number of different types of values in a space efficient representation.
@@ -48,8 +49,8 @@ use crate::interpreter::gc::GcRef;
 ///
 /// This opens up the lower 3 bits for use as a tag of sorts. If those bits are 000, we know we can
 /// use the `Value` as a [`GCRef`] as-is. Otherwise, the specific value of the tag tells us how
-/// to interpret the 48 remaining payload bits. For example, a tag of 001 denotes a signed 32 bit
-/// integer, and a tag of 010 denotes an unsigned 32 bit integer.
+/// to interpret the 48 remaining payload bits. For example, a tag of 001 denotes a signed 32-bit
+/// integer, and a tag of 010 denotes an unsigned 32-bit integer.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Value(u64);
 
@@ -104,9 +105,7 @@ impl Value {
                         UnwrappedValue::None
                     }
                 }
-                1 => {
-                    UnwrappedValue::Integer((numeric >> 3) as i32)
-                }
+                1 => UnwrappedValue::Integer((numeric >> 3) as i32),
                 // 1 => {
                 //     UnwrappedValue::SignedInteger((numeric >> 3) as i32)
                 // }
@@ -116,7 +115,7 @@ impl Value {
                 3..=7 => {
                     todo!()
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         } else {
             UnwrappedValue::Float(f64::from_bits(!numeric))
@@ -128,18 +127,18 @@ const fn mask(size: u8) -> u64 {
     (1u64 << size) - 1
 }
 
-const fn bextr(bits: u64, lower: u8, num: u8) -> u64 {
+const fn bit_extract(bits: u64, lower: u8, num: u8) -> u64 {
     (bits >> lower) & mask(num)
 }
 
 const fn f64_mantissa_bits(bits: u64) -> u64 {
-    bextr(bits, 0, 52)
+    bit_extract(bits, 0, 52)
 }
 
 const fn f64_exponent_bits(bits: u64) -> u64 {
-    bextr(bits, 52, 11)
+    bit_extract(bits, 52, 11)
 }
 
 const fn f64_sign_bit(bits: u64) -> u64 {
-    bextr(bits, 63, 1)
+    bit_extract(bits, 63, 1)
 }

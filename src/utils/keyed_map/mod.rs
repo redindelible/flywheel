@@ -13,7 +13,7 @@ pub use reservable::*;
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct KeyData(NonZero<u32>);
 
-pub unsafe trait KeyMapKey : From<KeyData> + Copy + Clone + Hash + Eq + Debug {
+pub trait KeyMapKey: From<KeyData> + Copy + Clone + Hash + Eq + Debug {
     fn data(&self) -> KeyData;
 }
 
@@ -29,7 +29,7 @@ macro_rules! declare_key_type {
                 }
             }
 
-            unsafe impl $crate::utils::KeyMapKey for $name {
+            impl $crate::utils::KeyMapKey for $name {
                 #[must_use]
                 fn data(&self) -> $crate::utils::KeyData { self.0 }
             }

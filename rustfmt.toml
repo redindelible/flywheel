@@ -1,0 +1,7 @@
+max_width = 120
+use_small_heuristics = "Max"
+
+unstable_features = true
+style_edition = "2024"
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
