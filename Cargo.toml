@@ -8,7 +8,7 @@ edition = "2021"
 
 [dependencies]
 #num_enum = "0.7.3"
-string-interner = "0.18.0"
+#string-interner = "0.18.0"
 regex-automata = "0.4.9"
 bumpalo = "3.16.0"
 dashmap = "6.1.0"
@@ -19,7 +19,11 @@ tokio = { version = "1.42.0", features = ["parking_lot", "rt-multi-thread", "syn
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 normpath = "1.3.0"
 im = "15.1.0"
-triomphe = { version = "0.1.14", default-features = false, features = ["std"] }
+triomphe = { version = "0.1.14", default-features = false, features = ["std", "stable_deref_trait"] }
+stable_deref_trait = "1.2.0"
+rangemap = "1.5.1"
+hashbrown = "0.15.2"
+rustc-hash = "2.1.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

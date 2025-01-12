@@ -4,13 +4,13 @@ use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::ast::{self, AstRef, StringsTable};
+use crate::frontend::ast::{self, AstRef};
 use crate::frontend::driver::Handle;
 use crate::frontend::error::{CompileError, CompileResult};
 use crate::frontend::parser::Parse;
 use crate::frontend::query::Processor;
 use crate::frontend::source::{Location, SourceID, SourceInput, Sources};
-use crate::utils::InternedString;
+use crate::utils::{InternedString, Interner};
 
 #[derive(Copy, Clone)]
 enum NamespaceRef {
@@ -252,9 +252,9 @@ pub struct ComputeDefinedTypes {
 }
 
 impl ComputeDefinedTypes {
-    pub fn new(strings: &StringsTable) -> Self {
+    pub fn new(strings: &Interner) -> Self {
         let mut root_namespace = Namespace::new(None);
-        root_namespace.insert(strings.get_or_intern("u32"), Value::TypeAlias(Type::Integer), None).unwrap();
+        root_namespace.insert(strings.get_or_intern_static("u32"), Value::TypeAlias(Type::Integer), None).unwrap();
 
         ComputeDefinedTypes { root_namespace }
     }

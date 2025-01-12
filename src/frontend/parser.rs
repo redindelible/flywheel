@@ -2,19 +2,20 @@ use std::collections::HashSet;
 
 use triomphe::Arc;
 
-use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST, StringsTable};
+use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
 use crate::frontend::driver::Handle;
 use crate::frontend::error::{CompileError, CompileResult};
-use crate::frontend::lexer::Lexer;
+use crate::frontend::lexer::{Lexer, LexerShared};
 use crate::frontend::query::Processor;
 use crate::frontend::source::{Location, SourceID};
 use crate::frontend::token::{Token, TokenStream, TokenType};
+use crate::utils::Interner;
 
-pub struct Parse(Arc<StringsTable>);
+pub struct Parse(LexerShared);
 
 impl Parse {
-    pub fn new(table: Arc<StringsTable>) -> Self {
-        Parse(table)
+    pub fn new(interner: &Arc<Interner>) -> Self {
+        Parse(LexerShared::new(interner))
     }
 }
 
@@ -24,9 +25,9 @@ impl Processor for Parse {
 
     async fn process(handle: Handle, input: SourceID) -> CompileResult<FileAST> {
         let source = handle.get_source(input);
-        let strings = handle.processor::<Parse>().0.clone();
-        FileAST::new(source.id(), strings, |context, builder| {
-            let lexer = Lexer::new(context, source.id(), source.text());
+        let strings = handle.processor::<Parse>();
+        FileAST::new(source.id(), strings.0.interner().clone_arc(), |builder| {
+            let lexer = Lexer::new(&strings.0, source.id(), source.text());
             let mut parser = Parser::new(lexer, builder);
             match parser.parse_file() {
                 Ok(top_levels) => Ok(top_levels),
@@ -318,7 +319,7 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
             Ok(self.ast.new_node(ast::Expr::Name(name.text.unwrap()), name.loc))
         } else if self.curr_is_ty(TokenType::Integer) {
             let constant = self.expect(TokenType::Integer)?;
-            let number = self.token_stream.strings().resolve(constant.text.unwrap()).unwrap().parse::<i64>();
+            let number = self.token_stream.interner().resolve(constant.text.unwrap()).parse::<i64>();
             match number {
                 Ok(number) => Ok(self.ast.new_node(ast::Expr::Integer(number), constant.loc)),
                 Err(_) => self.error(error_integer_too_big(constant.loc)),
@@ -364,12 +365,13 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
+    use triomphe::Arc;
 
     use crate::frontend::driver::FrontendDriver;
     use crate::frontend::parser::Parse;
     use crate::frontend::source::{SourceInput, Sources};
 
-    fn render_ast(text: String, _name: String) -> String {
+    fn render_ast(text: Arc<str>, _name: String) -> String {
         let driver = FrontendDriver::new();
         let handle = driver.get_handle();
         let ast = driver.block_on(async {

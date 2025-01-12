@@ -17,7 +17,7 @@ declare_key_type! {
 
 #[derive(Eq, PartialEq, Hash, Clone)]
 pub enum SourceInput {
-    String(String),
+    String(Arc<str>),
     AbsolutePath(Utf8PathBuf),
 }
 
@@ -50,16 +50,16 @@ impl SourceInput {
 }
 
 pub struct Sources {
-    table: parking_lot::RwLock<ReservableMap<SourceID, Arc<Source>>>,
+    sources: parking_lot::RwLock<ReservableMap<SourceID, Arc<Source>>>,
 }
 
 impl Sources {
     pub fn new() -> Self {
-        Sources { table: parking_lot::RwLock::new(ReservableMap::new()) }
+        Sources { sources: parking_lot::RwLock::new(ReservableMap::new()) }
     }
 
     pub fn get_source(&self, source_id: SourceID) -> ArcBorrow<'_, Source> {
-        let read_guard = self.table.read();
+        let read_guard = self.sources.read();
         unsafe {
             std::mem::transmute::<ArcBorrow<'_, Source>, ArcBorrow<'_, Source>>(
                 read_guard.get(source_id).unwrap().borrow_arc(),
@@ -83,14 +83,16 @@ impl Processor for Sources {
                     ));
                 };
                 let name = absolute_path.file_stem().unwrap().to_owned();
-                (Some(absolute_path), name, text)
+                (Some(absolute_path), name, text.into())
             }
         };
-        let source_id = handle
-            .processor::<Sources>()
-            .table
-            .write()
-            .add_with(|id| Arc::new(Source::new(id, absolute_path, name, text)));
+        let interner = handle.interner();
+        interner.add_buffer(text.clone());
+
+        let this = handle.processor::<Sources>();
+
+        let source_id = this.sources.write().add_with(|id| Arc::new(Source::new(id, absolute_path, name, text)));
+
         Ok(source_id)
     }
 }
@@ -121,14 +123,14 @@ impl Debug for Location {
 pub struct Source {
     id: SourceID,
     absolute_path: Option<Utf8PathBuf>,
-    text: String,
+    text: Arc<str>,
     name: String,
 
     line_offsets: OnceLock<Box<[usize]>>,
 }
 
 impl Source {
-    fn new(id: SourceID, absolute_path: Option<Utf8PathBuf>, name: String, text: String) -> Self {
+    fn new(id: SourceID, absolute_path: Option<Utf8PathBuf>, name: String, text: Arc<str>) -> Self {
         Source { id, absolute_path, name, text, line_offsets: OnceLock::new() }
     }
 

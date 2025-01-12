@@ -1,12 +1,11 @@
-use crate::frontend::ast::StringsTable;
 use crate::frontend::source::{Location, SourceID};
-use crate::utils::InternedString;
+use crate::utils::{InternedString, Interner};
 
 pub(super) trait TokenStream {
     fn next(&mut self) -> Option<Token>;
 
     fn source_id(&self) -> SourceID;
-    fn strings(&self) -> &StringsTable;
+    fn interner(&self) -> &Interner;
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -72,7 +71,7 @@ pub enum TokenType {
 }
 
 impl TokenType {
-    pub const fn keywords() -> &'static [(TokenType, &'static str)] {
+    pub(super) const fn keywords() -> &'static [(TokenType, &'static str)] {
         &[
             (TokenType::Fn, "fn"),
             (TokenType::Struct, "struct"),

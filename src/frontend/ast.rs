@@ -1,48 +1,14 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use bumpalo::Bump;
-use triomphe::Arc;
+use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::lexer::LexerShared;
 use crate::frontend::source::{Location, SourceID};
-use crate::frontend::token::TokenType;
 use crate::utils::{InternedString, Interner};
-
-pub struct StringsTable {
-    symbols: Interner,
-    keywords: HashMap<InternedString, TokenType>,
-    pub(super) lexer_shared: LexerShared,
-}
-
-impl StringsTable {
-    pub fn new() -> Self {
-        let symbols = Interner::new();
-        Self {
-            keywords: HashMap::from_iter(
-                TokenType::keywords().iter().map(|&(ty, text)| (symbols.get_or_intern_static(text), ty)),
-            ),
-            symbols,
-            lexer_shared: LexerShared::new(),
-        }
-    }
-
-    pub fn resolve(&self, symbol: InternedString) -> Option<parking_lot::MappedRwLockReadGuard<'_, str>> {
-        self.symbols.resolve(symbol)
-    }
-
-    pub fn get_or_intern(&self, text: &str) -> InternedString {
-        self.symbols.get_or_intern(text)
-    }
-
-    pub fn try_get_keyword(&self, symbol: InternedString) -> Option<TokenType> {
-        self.keywords.get(&symbol).copied()
-    }
-}
 
 pub struct AstRef<T>(u32, PhantomData<T>);
 
@@ -90,7 +56,7 @@ impl<T> AstRef<T> {
 pub struct FileAST {
     source_id: SourceID,
 
-    strings: Arc<StringsTable>,
+    strings: Arc<Interner>,
     _arena: Bump,
     nodes: Vec<NonNull<()>>,
     locations: Vec<Location>,
@@ -100,13 +66,13 @@ pub struct FileAST {
 }
 
 impl FileAST {
-    pub(super) fn new<F, E>(source_id: SourceID, strings: Arc<StringsTable>, try_build: F) -> Result<FileAST, E>
+    pub(super) fn new<F, E>(source_id: SourceID, strings: Arc<Interner>, try_build: F) -> Result<FileAST, E>
     where
-        F: for<'a> FnOnce(&'a StringsTable, &'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E>,
+        F: for<'a> FnOnce(&'a mut ASTBuilder) -> Result<AstListRef<TopLevel>, E>,
     {
         let mut allocator =
             ASTBuilder { arena: Bump::new(), nodes: Vec::new(), locations: Vec::new(), lists: Vec::new() };
-        let top_levels = try_build(&strings, &mut allocator)?;
+        let top_levels = try_build(&mut allocator)?;
         Ok(FileAST {
             source_id,
             strings,
@@ -118,12 +84,12 @@ impl FileAST {
         })
     }
 
-    pub fn strings(&self) -> &StringsTable {
-        &self.strings
+    pub fn strings(&self) -> ArcBorrow<'_, Interner> {
+        self.strings.borrow_arc()
     }
 
-    pub fn resolve(&self, interned: InternedString) -> String {
-        self.strings.resolve(interned).unwrap().to_owned()
+    pub fn resolve(&self, interned: InternedString) -> &str {
+        self.strings.resolve(interned)
     }
 
     pub fn source(&self) -> SourceID {
@@ -341,7 +307,7 @@ impl TopLevel {
 
 impl Pretty for Function {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
-        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
+        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name)));
         let return_type = context.to_tree(self.return_type);
         let body = context.to_tree(self.body);
         PrettyNode::from_struct("Function", [
@@ -355,7 +321,7 @@ impl Pretty for Function {
 
 impl Pretty for Struct {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
-        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
+        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name)));
         let fields = PrettyNode::from_list(context.get_list(self.fields).iter().map(|field| context.to_tree(*field)));
         PrettyNode::from_struct("Struct", [
             ("name", name),
@@ -367,8 +333,7 @@ impl Pretty for Struct {
 
 impl Pretty for Import {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
-        let relative_path =
-            PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.relative_path).unwrap()));
+        let relative_path = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.relative_path)));
         PrettyNode::from_struct("Import", [
             ("relative_path", relative_path),
             ("location", PrettyNode::from_location(location)),
@@ -378,7 +343,7 @@ impl Pretty for Import {
 
 impl Pretty for StructField {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
-        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name).unwrap()));
+        let name = PrettyNode::from_string(format!("{:?}", context.strings.resolve(self.name)));
         let ty = context.to_tree(self.ty);
         PrettyNode::from_struct("Field", [
             ("name", name),
@@ -413,7 +378,7 @@ impl Pretty for Stmt {
                 ("location", PrettyNode::from_location(location)),
             ]),
             Stmt::Let { name, ty, value } => {
-                let text = context.strings.resolve(*name).unwrap();
+                let text = context.strings.resolve(*name);
                 let ty = PrettyNode::from_option(ty.as_ref().map(|ty| context.to_tree(*ty)));
                 let value = context.to_tree(*value);
                 PrettyNode::from_struct("Let", [
@@ -452,14 +417,14 @@ impl Pretty for Expr {
                 ("location", PrettyNode::from_location(location)),
             ]),
             Expr::String(interned) => {
-                let text = context.strings.resolve(*interned).unwrap();
+                let text = context.strings.resolve(*interned);
                 PrettyNode::from_struct("String", [
                     ("value", PrettyNode::from_string(format!("{:?}", text))),
                     ("location", PrettyNode::from_location(location)),
                 ])
             }
             Expr::Name(interned) => {
-                let text = context.strings.resolve(*interned).unwrap();
+                let text = context.strings.resolve(*interned);
                 PrettyNode::from_struct("Name", [
                     ("value", PrettyNode::from_string(format!("{:?}", text))),
                     ("location", PrettyNode::from_location(location)),
@@ -467,7 +432,7 @@ impl Pretty for Expr {
             }
             Expr::Attr { object, name } => {
                 let object = context.to_tree(*object);
-                let name = context.strings.resolve(*name).unwrap();
+                let name = context.strings.resolve(*name);
                 PrettyNode::from_struct("Attr", [
                     ("object", object),
                     ("name", PrettyNode::from_string(format!("{:?}", name))),
@@ -531,9 +496,9 @@ impl Pretty for Type {
     fn to_tree(&self, context: &FileAST, location: Location) -> PrettyNode {
         match self {
             Type::Name(name) => {
-                let text = context.strings.resolve(*name).unwrap();
+                let text = context.strings.resolve(*name);
                 PrettyNode::from_struct("Name", [
-                    ("name", PrettyNode::from_string(format!("{:?}", &*text))),
+                    ("name", PrettyNode::from_string(format!("{:?}", text))),
                     ("location", PrettyNode::from_location(location)),
                 ])
             }
