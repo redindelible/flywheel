@@ -2,7 +2,7 @@ use std::hash::BuildHasher;
 use std::num::NonZero;
 use std::sync::{Arc, LazyLock};
 
-use hashbrown::HashMap;
+use hashbrown::HashTable;
 use parking_lot::{Mutex, RwLock};
 use rangemap::RangeMap;
 use stable_deref_trait::StableDeref;
@@ -11,35 +11,60 @@ use stable_deref_trait::StableDeref;
 pub struct InternedString(NonZero<u32>);
 
 #[derive(Clone)]
-struct AnyBuffer(&'static str, Arc<dyn StableDeref<Target = str> + Sync>);
+struct StrBuffer<'a>(&'a str, Arc<dyn StableDeref<Target = str> + Sync + 'a>);
 
-impl AnyBuffer {
+impl<'a> StrBuffer<'a> {
     fn new<B>(buffer: B) -> Self
     where
-        B: StableDeref<Target = str> + Sync + 'static,
+        B: StableDeref<Target = str> + Sync + 'a,
     {
-        let str = unsafe { std::mem::transmute::<&str, &'static str>(&*buffer) };
-        AnyBuffer(str, Arc::new(buffer))
+        let item = unsafe { std::mem::transmute::<&str, &'a str>(&*buffer) };
+        StrBuffer(item, Arc::new(buffer))
     }
 
-    fn str(&self) -> &str {
+    fn str(&self) -> &'a str {
         self.0
     }
 }
 
-impl PartialEq<Self> for AnyBuffer {
+impl<'a> PartialEq<Self> for StrBuffer<'a> {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.1, &other.1)
     }
 }
 
-impl Eq for AnyBuffer {}
+impl<'a> Eq for StrBuffer<'a> {}
+
+struct Buffers<'a>(RangeMap<usize, StrBuffer<'a>>);
+
+impl<'a> Buffers<'a> {
+    fn new() -> Self {
+        Buffers(RangeMap::new())
+    }
+
+    fn insert<B>(&mut self, buffer: B)
+    where
+        B: StableDeref<Target = str> + Sync + 'a,
+    {
+        let buffer = StrBuffer::new(buffer);
+        let ptr_range = buffer.str().as_bytes().as_ptr_range();
+        self.0.insert(ptr_range.start.addr()..ptr_range.end.addr(), buffer);
+    }
+
+    fn get_str(&self, str: &str) -> Option<&'a str> {
+        if self.0.contains_key(&str.as_ptr().addr()) {
+            Some(unsafe { std::mem::transmute::<&str, &'a str>(str) })
+        } else {
+            None
+        }
+    }
+}
 
 pub struct Interner<S = rustc_hash::FxBuildHasher> {
     default_buffers: Mutex<Vec<Box<str>>>,
-    buffers: Mutex<RangeMap<*const u8, AnyBuffer>>,
+    buffers: Mutex<Buffers<'static>>,
 
-    shards: Vec<RwLock<HashMap<&'static str, InternedString, ()>>>,
+    shards: Vec<RwLock<HashTable<(&'static str, InternedString)>>>,
     mask: u64,
     hasher: S,
 
@@ -65,8 +90,8 @@ impl<S> Interner<S> {
         assert!(shard_count.is_power_of_two());
         Interner {
             default_buffers: Mutex::new(Vec::new()),
-            buffers: Mutex::new(RangeMap::new()),
-            shards: std::iter::repeat_with(|| RwLock::new(HashMap::with_hasher(()))).take(shard_count).collect(),
+            buffers: Mutex::new(Buffers::new()),
+            shards: std::iter::repeat_with(|| RwLock::new(HashTable::new())).take(shard_count).collect(),
             mask: shard_count as u64 - 1,
             hasher,
             symbols: RwLock::new(vec![""]),
@@ -77,9 +102,7 @@ impl<S> Interner<S> {
     where
         B: StableDeref<Target = str> + Sync + 'static,
     {
-        let buffer = AnyBuffer::new(buffer);
-        let slice: &[u8] = buffer.str().as_bytes();
-        self.buffers.lock().insert(slice.as_ptr_range(), buffer);
+        self.buffers.lock().insert(buffer);
     }
 }
 
@@ -89,18 +112,14 @@ impl<S: BuildHasher> Interner<S> {
     }
 
     pub fn get_or_intern_in_buffer(&self, text: &str) -> InternedString {
-        self.get_or_intern_with_inserter(text, |text| {
-            let does_contain = self.buffers.lock().contains_key(&text.as_bytes().as_ptr());
-            assert!(does_contain);
-            unsafe { std::mem::transmute::<&str, &'static str>(text) }
-        })
+        self.get_or_intern_with_inserter(text, |text| self.buffers.lock().get_str(text).unwrap())
     }
 
     pub fn get_or_intern(&self, text: &str) -> InternedString {
         self.get_or_intern_with_inserter(text, |text| {
-            let does_contain = self.buffers.lock().contains_key(&text.as_bytes().as_ptr());
-            if does_contain {
-                unsafe { std::mem::transmute::<&str, &'static str>(text) }
+            let maybe_str = self.buffers.lock().get_str(text);
+            if let Some(maybe_str) = maybe_str {
+                maybe_str
             } else {
                 let text_box = text.to_owned().into_boxed_str();
                 let text_static = unsafe { std::mem::transmute::<&str, &'static str>(&*text_box) };
@@ -121,26 +140,25 @@ impl<S: BuildHasher> Interner<S> {
         let shard = self.shards.get(shard_index as usize).unwrap();
 
         let shard_guard = shard.read();
-        let maybe_entry = shard_guard.raw_entry().from_hash(hash_of_text, |&other| other == text);
-        if let Some((_, &symbol)) = maybe_entry {
+        let maybe_entry = shard_guard.find(hash_of_text, |&(other, _)| other == text);
+        if let Some(&(_, symbol)) = maybe_entry {
             return symbol;
         }
         drop(shard_guard);
 
         let mut shard_guard = shard.write();
-        let maybe_entry = shard_guard.raw_entry_mut().from_hash(hash_of_text, |&other| other == text);
+        let maybe_entry =
+            shard_guard.entry(hash_of_text, |&(other, _)| other == text, |&(key, _)| self.hasher.hash_one(key));
         match maybe_entry {
-            hashbrown::hash_map::RawEntryMut::Occupied(occupied) => *occupied.get(),
-            hashbrown::hash_map::RawEntryMut::Vacant(vacant) => {
+            hashbrown::hash_table::Entry::Occupied(occupied) => occupied.get().1,
+            hashbrown::hash_table::Entry::Vacant(vacant) => {
                 let text_static = inserter(text);
                 let mut write_guard = self.symbols.write();
                 let symbol = InternedString(NonZero::new(write_guard.len() as u32).unwrap());
                 write_guard.push(text_static);
                 drop(write_guard);
 
-                vacant.insert_with_hasher(hash_of_text, text_static, symbol, |&key| {
-                    self.hasher.hash_one::<&'static str>(key)
-                });
+                vacant.insert((text_static, symbol));
                 symbol
             }
         }
