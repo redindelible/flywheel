@@ -3,12 +3,8 @@ use std::hash::Hash;
 use std::num::NonZero;
 
 pub mod reservable;
-// pub mod concurrent;
-// mod sharded;
 
 pub use reservable::*;
-// pub use concurrent::*;
-// pub use sharded::*;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct KeyData(NonZero<u32>);

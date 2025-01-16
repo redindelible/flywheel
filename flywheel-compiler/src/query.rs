@@ -4,8 +4,8 @@ use std::hash::Hash;
 use futures_util::FutureExt;
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::driver::Handle;
-use crate::frontend::error::CompileResult;
+use crate::driver::Handle;
+use crate::error::CompileResult;
 
 pub trait QueryEngine {
     fn get_processor<T>(&self) -> &T
@@ -66,7 +66,7 @@ macro_rules! query_engine {
     {$vis:vis struct $name:ident { $($field:ident: $ty:ty),* $(,)? } } => {
         $vis struct $name {
             $(
-                $field: $crate::frontend::query::State<$ty>
+                $field: $crate::query::State<$ty>
             ),*
         }
 
@@ -75,16 +75,16 @@ macro_rules! query_engine {
             impl $name {
                 pub fn new($($field: $ty),*) -> Self {
                     Self {
-                        $($field: $crate::frontend::query::State::new($field)),*
+                        $($field: $crate::query::State::new($field)),*
                     }
                 }
             }
 
-            impl $crate::frontend::query::QueryEngine for $name { }
+            impl $crate::query::QueryEngine for $name { }
 
             $(
-                impl $crate::frontend::query::SupportsQueryOn<$ty> for $name {
-                    fn select(&self) -> &$crate::frontend::query::State<$ty> {
+                impl $crate::query::SupportsQueryOn<$ty> for $name {
+                    fn select(&self) -> &$crate::query::State<$ty> {
                         &self.$field
                     }
                 }

@@ -6,9 +6,9 @@ use std::sync::OnceLock;
 use camino::{Utf8Path, Utf8PathBuf};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::driver::Handle;
-use crate::frontend::error::{CompileError, CompileResult};
-use crate::frontend::query::Processor;
+use crate::driver::Handle;
+use crate::error::{CompileError, CompileResult};
+use crate::query::Processor;
 use crate::utils::{ReservableMap, declare_key_type};
 
 declare_key_type! {

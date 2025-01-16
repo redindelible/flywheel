@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use triomphe::Arc;
 
-use crate::frontend::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
-use crate::frontend::driver::Handle;
-use crate::frontend::error::{CompileError, CompileResult};
-use crate::frontend::lexer::{Lexer, LexerShared};
-use crate::frontend::query::Processor;
-use crate::frontend::source::{Location, SourceID};
-use crate::frontend::token::{Token, TokenStream, TokenType};
+use crate::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
+use crate::driver::Handle;
+use crate::error::{CompileError, CompileResult};
+use crate::lexer::{Lexer, LexerShared};
+use crate::query::Processor;
+use crate::source::{Location, SourceID};
+use crate::token::{Token, TokenStream, TokenType};
 use crate::utils::Interner;
 
 pub struct Parse(LexerShared);
@@ -367,9 +367,9 @@ mod test {
     use pretty_assertions::assert_eq;
     use triomphe::Arc;
 
-    use crate::frontend::driver::FrontendDriver;
-    use crate::frontend::parser::Parse;
-    use crate::frontend::source::{SourceInput, Sources};
+    use crate::driver::FrontendDriver;
+    use crate::parser::Parse;
+    use crate::source::{SourceInput, Sources};
 
     fn render_ast(text: Arc<str>, _name: String) -> String {
         let driver = FrontendDriver::new();

@@ -1,4 +1,4 @@
-use crate::frontend::source::{Location, SourceID};
+use crate::source::{Location, SourceID};
 use crate::utils::{InternedString, Interner};
 
 pub(super) trait TokenStream {

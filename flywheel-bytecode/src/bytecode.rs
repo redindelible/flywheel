@@ -16,17 +16,13 @@ impl<B: AsRef<[u32]>> Function<B> {
         self.bytecode.as_ref()
     }
 
-    pub fn from_untrusted_bytecode(required_stack: u32, bytecode: B) -> Result<Self, ()>{
+    pub fn from_untrusted_bytecode(required_stack: u32, bytecode: B) -> Option<Self> {
         let mut decoder = Decoder::new(bytecode.as_ref());
 
-        let check_register = move |register: u8| if (register as u32) < required_stack { Ok(()) } else { Err(()) };
+        let check_register = move |register: u8| if (register as u32) < required_stack { Some(()) } else { None };
         let check_offset = move |decoder: &mut Decoder, offset: i32| {
             let next_index = decoder.index().wrapping_add_signed(offset);
-            if (0..decoder.num_instructions()).contains(&next_index) {
-                Ok(())
-            } else {
-                Err(())
-            }
+            if (0..decoder.num_instructions()).contains(&next_index) { Some(()) } else { None }
         };
 
         let mut last_instruction = None;
@@ -42,8 +38,7 @@ impl<B: AsRef<[u32]>> Function<B> {
                 | DecodedInstruction::LessEqual { dest, left, right }
                 | DecodedInstruction::GreaterEqual { dest, left, right }
                 | DecodedInstruction::Equal { dest, left, right }
-                | DecodedInstruction::NotEqual { dest, left, right }
-                => {
+                | DecodedInstruction::NotEqual { dest, left, right } => {
                     check_register(dest)?;
                     check_register(left)?;
                     check_register(right)?;
@@ -51,8 +46,7 @@ impl<B: AsRef<[u32]>> Function<B> {
                 DecodedInstruction::Jump { offset } => {
                     check_offset(&mut decoder, offset.to_i32())?;
                 }
-                DecodedInstruction::JumpIfTrue { cond, offset }
-                | DecodedInstruction::JumpIfFalse { cond, offset }=> {
+                DecodedInstruction::JumpIfTrue { cond, offset } | DecodedInstruction::JumpIfFalse { cond, offset } => {
                     check_register(cond)?;
                     check_offset(&mut decoder, offset as i32)?;
                 }
@@ -61,17 +55,14 @@ impl<B: AsRef<[u32]>> Function<B> {
                 }
             }
         }
-        if last_instruction.is_none_or(|last| !last.is_terminator()) {
-            return Err(());
-        }
 
-        Ok(Function {
-            required_stack,
-            bytecode
-        })
+        if last_instruction.is_some_and(|last| last.is_terminator()) {
+            Some(Function { required_stack, bytecode })
+        } else {
+            None
+        }
     }
 }
-
 
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -91,7 +82,6 @@ impl u24 {
         self.0
     }
 }
-
 
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -129,7 +119,6 @@ pub enum InstructionTag {
     Return,
 }
 
-
 #[repr(u8)]
 #[derive(Copy, Clone)]
 pub enum DecodedInstruction {
@@ -154,7 +143,7 @@ impl DecodedInstruction {
             | DecodedInstruction::JumpIfFalse { .. }
             | DecodedInstruction::JumpIfTrue { .. }
             | DecodedInstruction::Return { .. } => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -218,7 +207,7 @@ impl DecodedInstruction {
 
 pub struct Decoder<'src> {
     instructions: &'src [u32],
-    index: usize
+    index: usize,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -282,4 +271,3 @@ impl<'src> Iterator for Decoder<'src> {
         self.decode_next()
     }
 }
-

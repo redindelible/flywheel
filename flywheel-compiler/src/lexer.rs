@@ -4,8 +4,8 @@ use regex_automata::meta::Regex;
 use regex_automata::{Anchored, Input, Span};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::source::{Location, SourceID};
-use crate::frontend::token::{Token, TokenStream, TokenType};
+use crate::source::{Location, SourceID};
+use crate::token::{Token, TokenStream, TokenType};
 use crate::utils::{InternedString, Interner};
 
 #[derive(Debug)]

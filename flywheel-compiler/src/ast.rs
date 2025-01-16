@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use bumpalo::Bump;
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::source::{Location, SourceID};
+use crate::source::{Location, SourceID};
 use crate::utils::{InternedString, Interner};
 
 pub struct AstRef<T>(u32, PhantomData<T>);

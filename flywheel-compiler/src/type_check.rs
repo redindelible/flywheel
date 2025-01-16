@@ -4,12 +4,12 @@ use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::ast::{self, AstRef};
-use crate::frontend::driver::Handle;
-use crate::frontend::error::{CompileError, CompileResult};
-use crate::frontend::parser::Parse;
-use crate::frontend::query::Processor;
-use crate::frontend::source::{Location, SourceID, SourceInput, Sources};
+use crate::ast::{self, AstRef};
+use crate::driver::Handle;
+use crate::error::{CompileError, CompileResult};
+use crate::parser::Parse;
+use crate::query::Processor;
+use crate::source::{Location, SourceID, SourceInput, Sources};
 use crate::utils::{InternedString, Interner};
 
 #[derive(Copy, Clone)]

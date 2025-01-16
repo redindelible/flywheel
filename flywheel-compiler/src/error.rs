@@ -3,8 +3,8 @@ use std::fmt::{Debug, Display, Formatter};
 
 use triomphe::Arc;
 
-use crate::frontend::driver::{FrontendDriver, Handle};
-use crate::frontend::source::Location;
+use crate::driver::{FrontendDriver, Handle};
+use crate::source::Location;
 
 pub type CompileResult<T> = Result<T, CompileError>;
 

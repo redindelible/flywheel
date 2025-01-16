@@ -5,11 +5,11 @@ use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use triomphe::{Arc, ArcBorrow};
 
-use crate::frontend::error::CompileResult;
-use crate::frontend::parser::Parse;
-use crate::frontend::query::{Processor, QueryEngine, SupportsQueryOn, query_engine};
-use crate::frontend::source::{Source, SourceID, SourceInput, Sources};
-use crate::frontend::type_check::{ComputeDeclaredNames, ComputeDefinedTypes, DefinedTypes};
+use crate::error::CompileResult;
+use crate::parser::Parse;
+use crate::query::{Processor, QueryEngine, SupportsQueryOn, query_engine};
+use crate::source::{Source, SourceID, SourceInput, Sources};
+use crate::type_check::{ComputeDeclaredNames, ComputeDefinedTypes, DefinedTypes};
 use crate::utils::Interner;
 
 pub struct FrontendDriver(Handle);
@@ -95,5 +95,11 @@ impl Handle {
         CompilerQueryEngine: SupportsQueryOn<P>,
     {
         self.inner.query_engine.query(self, input).await
+    }
+}
+
+impl Default for FrontendDriver {
+    fn default() -> Self {
+        FrontendDriver::new()
     }
 }

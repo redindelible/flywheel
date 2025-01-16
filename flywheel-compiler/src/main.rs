@@ -1,11 +1,6 @@
 use std::time::Instant;
 
-use crate::frontend::FrontendDriver;
-
-// mod codegen;
-// mod interpreter;
-mod frontend;
-mod utils;
+use flywheel_compiler::FrontendDriver;
 
 fn main() {
     let frontend = FrontendDriver::new();
