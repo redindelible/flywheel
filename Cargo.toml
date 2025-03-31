@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "flywheel-bytecode",
-    "flywheel-compiler"
+    "exchange",
+    "flywheel-compiler",
+    "flywheel-interpreter"
 ]
 
 #[profile.release]

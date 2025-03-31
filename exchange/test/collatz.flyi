@@ -1,0 +1,38 @@
+
+define %collatz (int %n) int {
+@entry
+    load.local %n
+    load.int 1
+    le
+    branch @base @rec
+@base
+    load.int 0
+    ret
+@rec
+    load.local %n
+    load.int 2
+    mod
+    load.int 0
+    eq
+    branch @even @off
+@even
+    load.const %collatz
+    load.local %n
+    load.int 2
+    div
+    call 1
+    load.int 1
+    add
+    ret
+@odd
+    load.const %collatz
+    load.int 3
+    load.local %n
+    mul
+    load.int 1
+    add
+    call 1
+    load.int 1
+    add
+    ret
+}

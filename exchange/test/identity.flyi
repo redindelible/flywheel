@@ -1,0 +1,4 @@
+
+define %identity [any $T]($T %item) $T {
+    ret
+}

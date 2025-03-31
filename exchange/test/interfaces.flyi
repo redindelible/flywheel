@@ -1,0 +1,5 @@
+struct %Rectangle { int, int }
+
+interface %Shape {
+    [](this) int
+}
