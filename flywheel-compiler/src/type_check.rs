@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::ast::{self, AstRef};
+use crate::ast::{self};
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
 use crate::parser::Parse;
@@ -21,7 +21,7 @@ enum NamespaceRef {
 #[derive(Copy, Clone)]
 pub enum Type {
     Integer,
-    Struct(SourceID, AstRef<ast::Struct>),
+    Struct(SourceID, ast::Struct),
 }
 
 #[derive(Copy, Clone)]
