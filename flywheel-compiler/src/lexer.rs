@@ -41,8 +41,8 @@ const PATTERNS: &[(&str, PatternType)] = &[
     (r"\*", PatternType::Basic(TokenType::Star)),
     (r"\/", PatternType::Basic(TokenType::Slash)),
     (r"\%", PatternType::Basic(TokenType::Percent)),
-    (r"\{", PatternType::Basic(TokenType::LeftBrace)),
-    (r"\}", PatternType::Basic(TokenType::RightBrace)),
+    (r"\{", PatternType::Basic(TokenType::LeftCurlyBrace)),
+    (r"\}", PatternType::Basic(TokenType::RightCurlyBrace)),
     (r"\(", PatternType::Basic(TokenType::LeftParenthesis)),
     (r"\)", PatternType::Basic(TokenType::RightParenthesis)),
     (r"\[", PatternType::Basic(TokenType::LeftBracket)),
@@ -105,7 +105,7 @@ impl<'a> Lexer<'a> {
                 ty: TokenType::Error,
                 text: None,
                 has_leading_whitespace: false,
-                loc: error.loc,
+                location: error.loc,
             })
         })
     }
@@ -133,18 +133,18 @@ impl<'a> Lexer<'a> {
                             ty: TokenType::String,
                             text: Some(symbol),
                             has_leading_whitespace,
-                            loc,
+                            location: loc,
                         }));
                     }
                     PatternType::Interned(ty_fn) => {
                         let symbol = self.interner.get_or_intern_in_buffer(str);
                         let ty = self.keywords.get(&symbol).copied().unwrap_or(ty_fn);
                         self.span = input.get_span();
-                        return Some(Ok(Token { ty, text: Some(symbol), has_leading_whitespace, loc }));
+                        return Some(Ok(Token { ty, text: Some(symbol), has_leading_whitespace, location: loc }));
                     }
                     PatternType::Basic(ty) => {
                         self.span = input.get_span();
-                        return Some(Ok(Token { ty, text: None, has_leading_whitespace, loc }));
+                        return Some(Ok(Token { ty, text: None, has_leading_whitespace, location: loc }));
                     }
                 }
             } else {
