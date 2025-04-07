@@ -298,45 +298,45 @@ impl<L: TokenStream> Parser<L> {
     }
 
     fn parse_expr_mul(&mut self) -> ParseResult<ast::Expression> {
-        let left = self.parse_expr_call()?;
+        let left = self.parse_attribute_access()?;
         // loop {
         //     break;
         // }
         Ok(left)
     }
 
-    fn parse_expr_call(&mut self) -> ParseResult<ast::Expression> {
-        let mut left = self.parse_expr_terminal()?;
-        loop {
-            if self.current_is_type(TokenType::Period) {
-                self.advance();
-                let attr = self.expect(TokenType::Identifier)?;
-                left = ast::Expression::call(ast::Expression::attribute { object: left, name: attr.text.unwrap() })
-                left = self.ast.new_node(
-                    ,
-                    self.ast.get_location(left).combine(attr.location),
-                );
-            } else if self.current_is_type(TokenType::LeftParenthesis) {
-                self.advance();
-                let mut arguments = Vec::new();
-                while !self.current_is_type(TokenType::RightParenthesis) {
-                    arguments.push(self.parse_expr()?);
-                    if self.current_is_type(TokenType::Comma) {
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
-                let end = self.expect(TokenType::RightParenthesis)?;
+    fn parse_attribute(&mut self, on: ast::Expression) -> ParseResult<ast::Expression> {
+        self.expect(TokenType::Period)?;
+        let attribute = self.expect(TokenType::Identifier)?;
+        Ok(
+            ast::Expression::attribute(on, attribute.text.unwrap())
+        )
+    }
 
-                let arguments = self.ast.new_list(arguments);
-                left = self.ast.new_node(
-                    ast::Expression::Call { callee: left, arguments },
-                    self.ast.get_location(left).combine(end.location),
-                );
+    fn parse_call(&mut self, callee: ast::Expression) -> ParseResult<ast::Expression> {
+        self.advance();
+        let mut arguments = Vec::new();
+        while !self.current_is_type(TokenType::RightParenthesis) {
+            arguments.push(self.parse_expr()?);
+            if self.current_is_type(TokenType::Comma) {
+                self.advance();
             } else {
                 break;
             }
+        }
+
+        Ok(ast::Expression::call(callee, arguments))
+    }
+
+    fn parse_attribute_access(&mut self) -> ParseResult<ast::Expression> {
+        let mut left = self.parse_expr_terminal()?;
+
+        loop {
+            left = match self.current_type() {
+                TokenType::Period => self.parse_attribute(left)?,
+                TokenType::LeftParenthesis => self.parse_call(left)?,
+                _ => break
+            };
         }
         Ok(left)
     }
@@ -357,7 +357,7 @@ impl<L: TokenStream> Parser<L> {
 
     fn parse_parenthesized_expression(&mut self) -> ParseResult<ast::Expression> {
         // skip over the left paren
-        self.advance();
+        self.expect(TokenType::LeftParenthesis)?;
         let expr = self.parse_expr()?;
         self.expect(TokenType::RightParenthesis)?;
         Ok(expr)
@@ -365,7 +365,7 @@ impl<L: TokenStream> Parser<L> {
 
     fn parse_if(&mut self) -> ParseResult<ast::Expression> {
         // skip over the if.
-        self.advance();
+        self.expect(TokenType::If)?;
         let condition = if self.current_is_type(TokenType::LeftParenthesis) {
             self.advance();
             let expr = self.parse_expr()?;
