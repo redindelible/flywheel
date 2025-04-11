@@ -1,7 +1,8 @@
-use crate::file_ast::FileAST;
+use crate::utils::beacon::Beacon;
+pub(crate) use crate::file_ast::FileAST;
 use crate::source::{Location};
 use crate::utils::{InternedString};
-use crate::utils::located::{Beacon, Located};
+use crate::utils::located::Located;
 use crate::utils::pretty_tree::{AsDebugTree, PrettyTree};
 
 pub enum TopLevel {
@@ -17,6 +18,7 @@ pub struct Function {
     pub location: Location
 }
 
+#[derive(Clone)]
 pub struct Struct {
     pub name: InternedString,
     pub fields: Vec<StructField>,
@@ -28,6 +30,7 @@ pub struct Import {
     pub location: Location
 }
 
+#[derive(Copy, Clone)]
 pub struct StructField {
     pub name: InternedString,
     pub ty: Beacon<Type>,
@@ -50,7 +53,7 @@ pub enum Statement {
 impl Located for Statement {
     fn location(&self) -> Location {
         match self {
-            Statement::Let { name, value, .. } => name.location.combine(value.location()),
+            Statement::Let { name, value, .. } => name.location().combine(value.location()),
             Statement::While { condition, body } => condition.location().combine(body.location),
             Statement::Return(e) | Statement::Expr(e) => e.location(),
         }
@@ -115,15 +118,15 @@ impl Expression {
 impl Located for Expression {
     fn location(&self) -> Location {
         match self {
-            Expression::Bool(t) => t.location,
-            Expression::Float(t) => t.location,
-            Expression::Integer(t) => t.location,
-            Expression::String(t) => t.location,
-            Expression::Name(t) => t.location,
+            Expression::Bool(t) => t.location(),
+            Expression::Float(t) => t.location(),
+            Expression::Integer(t) => t.location(),
+            Expression::String(t) => t.location(),
+            Expression::Name(t) => t.location(),
             Expression::Block(t) => t.location,
             Expression::Attr { object, .. } => object.location(),
             Expression::Index { object, ..} => object.location(),
-            Expression::Unary { op, right } => op.location.combine(right.location()),
+            Expression::Unary { op, right } => op.location().combine(right.location()),
             Expression::Binary { left, right, .. } => left.location().combine(right.location()),
             Expression::IfElse { condition, then_do, else_do } => {
                 let mandatory = condition.location().combine(then_do.location());
@@ -174,6 +177,7 @@ impl BinaryOp {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum Type {
     Name(InternedString),
 }
@@ -384,7 +388,7 @@ impl AsDebugTree for Beacon<Type> {
                 let text = context.strings.resolve(*name);
                 PrettyTree::from_struct("Name", [
                     ("name", PrettyTree::from_string(format!("{:?}", text))),
-                    ("location", PrettyTree::from_location(self.location)),
+                    ("location", PrettyTree::from_location(self.location())),
                 ])
             }
         }

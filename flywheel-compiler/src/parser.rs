@@ -10,8 +10,9 @@ use crate::lexer::{Lexer, LexerShared};
 use crate::query::Processor;
 use crate::source::{Location, SourceID};
 use crate::token::{Token, TokenStream, TokenType};
+use crate::utils::beacon::Beacon;
 use crate::utils::Interner;
-use crate::utils::located::{Beacon, Located};
+use crate::utils::located::Located;
 
 pub struct Parse(LexerShared);
 
@@ -194,7 +195,7 @@ impl<L: TokenStream> Parser<L> {
 
         let return_type = self.parse_type()?;
         let body = self.parse_block()?;
-        let loc = start.location.combine(return_type.location);
+        let loc = start.location.combine(return_type.location());
 
         Ok(ast::Function { name, return_type, body, location: loc })
     }
