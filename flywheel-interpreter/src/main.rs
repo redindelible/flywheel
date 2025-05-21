@@ -2,6 +2,110 @@ mod value;
 
 use crate::value::Value;
 
+struct Function {
+    required_registers: u32,
+    instructions: Box<[Instruction]>
+}
+
+struct CallFrame {
+    registers_start: usize,
+    ip: InstrPtr
+}
+
+#[derive(Copy, Clone)]
+struct InstrPtr(*const Instruction);
+
+impl InstrPtr {
+    unsafe fn get(&self) -> Instruction {
+        unsafe { *self.0 }
+    }
+
+    unsafe fn advance(&mut self) -> Instruction {
+        unsafe {
+            self.0 = self.0.add(1);
+            *self.0
+        }
+    }
+}
+
+struct VMStateInner {
+    registers: Vec<Value>,
+    call_stack: Vec<CallFrame>,
+}
+
+impl VMStateInner {
+    fn new() -> Self {
+        Self {
+            registers: vec![],
+            call_stack: vec![]
+        }
+    }
+}
+
+struct VMState<'a>(&'a mut VMStateInner);
+
+impl<'a> VMState<'a> {
+    unsafe fn initial_call_frame(self, function: *const Function) -> (InstrPtr, Context<'a>) {
+        let ip = unsafe { InstrPtr((*function).instructions.as_ptr()) };
+        let required = unsafe { (*function).required_registers };
+
+        let start = self.0.registers.len();
+        self.0.registers.extend(std::iter::repeat_n(Value::new_none(), required as usize));
+
+        self.0.call_stack.push(CallFrame {
+            registers_start: start,
+            ip
+        });
+        let registers_view = self.0.registers[start..].as_mut_ptr();
+        (ip, Context { registers_view, vm_state: self })
+    }
+
+    unsafe fn push_call_frame(self, ip: InstrPtr, function: *const Function) -> (InstrPtr, Context<'a>) {
+        let current_call_frame = unsafe { self.0.call_stack.last_mut().unwrap_unchecked() };
+        current_call_frame.ip = ip;
+
+        unsafe { self.initial_call_frame(function) }
+    }
+
+    unsafe fn pop_call_frame(self) -> Option<(InstrPtr, Context<'a>)> {
+        let current = unsafe { self.0.call_stack.pop().unwrap_unchecked() };
+        self.0.registers.drain(current.registers_start..);
+        if let Some(frame) = self.0.call_stack.last() {
+            let start = frame.registers_start;
+            let registers_view = self.0.registers[start..].as_mut_ptr();
+            Some((frame.ip, Context { registers_view, vm_state: self }))
+        } else {
+            None
+        }
+    }
+}
+
+struct Context<'a> {
+    registers_view: *mut Value,
+    vm_state: VMState<'a>
+}
+
+const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
+
+impl<'a> Context<'a> {
+    unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
+        unsafe {
+            self.registers_view.add(register.into()).write(value);
+        }
+    }
+
+    unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
+        unsafe {
+            self.registers_view.add(register.into()).read()
+        }
+    }
+
+    fn to_vm_state(self) -> VMState<'a> {
+        self.vm_state
+    }
+}
+
+
 macro_rules! generate_instructions {
     { $vis:vis enum $instrs:ident(enum $opcode:ident) { $( $instr:ident $({ $($field:ident : $ty:ty),* $(,)? })? ),* $(,)? } } => {
         #[allow(non_camel_case_types)]
@@ -37,107 +141,6 @@ generate_instructions! {
         lzi16 { dst: u8, imm: u16 },  // Load integer from 16 bit immediate zero-extended to 32 bits
         addi { dst: u8, left: u8, right: u8},
         ret { src: u8 }
-    }
-}
-
-struct Function {
-    required_registers: u32,
-    instructions: Box<[Instruction]>
-}
-
-struct CallFrame {
-    registers_start: usize,
-    ip: InstrPtr
-}
-
-#[derive(Copy, Clone)]
-struct InstrPtr(*const Instruction);
-
-impl InstrPtr {
-    unsafe fn get(&self) -> Instruction {
-        unsafe { *self.0 }
-    }
-
-    unsafe fn advance(&mut self) -> Instruction {
-        unsafe {
-            self.0 = self.0.add(1);
-            *self.0
-        }
-    }
-}
-
-struct VMStateInner {
-    registers: Vec<Value>,
-    call_stack: Vec<CallFrame>,
-}
-
-struct VMState(Box<VMStateInner>);
-
-impl VMState {
-    fn new() -> Self {
-        VMState(Box::new(VMStateInner {
-            registers: vec![],
-            call_stack: vec![]
-        }))
-    }
-
-    unsafe fn initial_call_frame(mut self, function: *const Function) -> (InstrPtr, Context) {
-        let ip = unsafe { InstrPtr((*function).instructions.as_ptr()) };
-        let required = unsafe { (*function).required_registers };
-
-        let start = self.0.registers.len();
-        self.0.registers.extend(std::iter::repeat_n(Value::new_none(), required as usize));
-
-        self.0.call_stack.push(CallFrame {
-            registers_start: start,
-            ip
-        });
-        let registers_view = self.0.registers[start..].as_mut_ptr();
-        (ip, Context { registers_view, vm_state: self })
-    }
-
-    unsafe fn push_call_frame(mut self, ip: InstrPtr, function: *const Function) -> (InstrPtr, Context) {
-        let current_call_frame = unsafe { self.0.call_stack.last_mut().unwrap_unchecked() };
-        current_call_frame.ip = ip;
-
-        unsafe { self.initial_call_frame(function) }
-    }
-
-    unsafe fn pop_call_frame(mut self) -> Option<(InstrPtr, Context)> {
-        let current = unsafe { self.0.call_stack.pop().unwrap_unchecked() };
-        self.0.registers.drain(current.registers_start..);
-        if let Some(frame) = self.0.call_stack.last() {
-            let start = frame.registers_start;
-            let registers_view = self.0.registers[start..].as_mut_ptr();
-            Some((frame.ip, Context { registers_view, vm_state: self }))
-        } else {
-            None
-        }
-    }
-}
-
-struct Context {
-    registers_view: *mut Value,
-    vm_state: VMState
-}
-
-const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
-
-impl Context {
-    unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
-        unsafe {
-            self.registers_view.add(register.into()).write(value);
-        }
-    }
-
-    unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
-        unsafe {
-            self.registers_view.add(register.into()).read()
-        }
-    }
-
-    fn to_vm_state(self) -> VMState {
-        self.vm_state
     }
 }
 
@@ -223,21 +226,42 @@ define! {
     }
 }
 
+struct VirtualMachine {
+    state: VMStateInner
+}
+
+impl VirtualMachine {
+    fn new() -> Self {
+        VirtualMachine {
+            state: VMStateInner::new()
+        }
+    }
+    
+    fn execute(&mut self, function: &Function, args: &[Value]) -> Result<Value, ()> {
+        assert!(args.len() <= function.required_registers as usize);
+        unsafe {
+            
+            let (ip, mut frame) = VMState(&mut self.state).initial_call_frame(function);
+            for (i, arg) in args.iter().copied().enumerate() {
+                frame.write_unchecked(i, arg)
+            }
+            execute(ip, frame)
+        }
+    }
+}
+
 fn main() {
     let function = Function {
         required_registers: 2,
         instructions: vec![
-            Instruction::lzi16 { dst: 0, imm: 3 },
+            // Instruction::lzi16 { dst: 0, imm: 3 },
             Instruction::lzi16 { dst: 1, imm: 7 },
             Instruction::addi { dst: 0, left: 0, right: 1 },
             Instruction::ret { src: 0 }
         ].into()
     };
-
-    let context = VMState::new();
-    let (ip, frame) = unsafe { context.initial_call_frame(&function) };
-    let result = unsafe {
-        execute(ip, frame)
-    };
+    
+    let mut vm = VirtualMachine::new();
+    let result = vm.execute(&function, &[Value::from_i32(3)]);
     dbg!(result.unwrap().unwrap());
 }
