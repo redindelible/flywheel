@@ -1,6 +1,7 @@
 mod value;
 
-use crate::value::Value;
+use std::time::Instant;
+use crate::value::{UnwrappedValue, Value};
 
 struct Function {
     required_registers: u32,
@@ -26,23 +27,13 @@ impl InstrPtr {
             *self.0
         }
     }
-}
-
-struct VMStateInner {
-    registers: Vec<Value>,
-    call_stack: Vec<CallFrame>,
-}
-
-impl VMStateInner {
-    fn new() -> Self {
-        Self {
-            registers: vec![],
-            call_stack: vec![]
-        }
+    
+    unsafe fn offset(&mut self, amount: isize) {
+        unsafe { self.0 = self.0.offset(amount) };
     }
 }
 
-struct VMState<'a>(&'a mut VMStateInner);
+struct VMState<'a>(&'a mut VirtualMachine);
 
 impl<'a> VMState<'a> {
     unsafe fn initial_call_frame(self, function: *const Function) -> (InstrPtr, Context<'a>) {
@@ -90,7 +81,8 @@ const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
 impl<'a> Context<'a> {
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
         unsafe {
-            self.registers_view.add(register.into()).write(value);
+            let register = register.into();
+            self.registers_view.add(register).write(value);
         }
     }
 
@@ -139,7 +131,13 @@ macro_rules! generate_instructions {
 generate_instructions! {
     pub enum Instruction(enum InstructionCode) {
         lzi16 { dst: u8, imm: u16 },  // Load integer from 16 bit immediate zero-extended to 32 bits
-        addi { dst: u8, left: u8, right: u8},
+        iadd { dst: u8, left: u8, right: u8 },
+        imul { dst: u8, left: u8, right: u8 },
+        idiv { dst: u8, left: u8, right: u8 },
+        imod { dst: u8, left: u8, right: u8 },
+        ieq { dst: u8, left: u8, right: u8 },
+        jtr { src: u8, off: i16 },
+        jmp { _pad: u8, off: i16 },
         ret { src: u8 }
     }
 }
@@ -177,7 +175,7 @@ macro_rules! define {
         const DISPATCH_TABLE: [Option<DispatchFn>; 256] = const { 
             let mut table: [Option<DispatchFn>; 256] = [None; 256];
             $(
-            table[InstructionCode::$op as usize] = Some(|instr, #[allow(unused_variables, unused_mut)] mut $ip: $ip_ty, mut $frame: $frame_ty| -> $ret {
+            table[InstructionCode::$op as usize] = Some(|instr, #[allow(unused_variables, unused_mut)] mut $ip: $ip_ty, #[allow(unused_variables, unused_mut)] mut $frame: $frame_ty| -> $ret {
                 let Instruction::$op { $($field),* } = instr else { unsafe { std::hint::unreachable_unchecked() } };
                 $body;
                 #[allow(unreachable_code)]
@@ -210,10 +208,39 @@ define! {
         lzi16 { dst, imm } => unsafe {
             frame.write_unchecked(dst, Value::from_i32(imm as u32 as i32));
         }
-        addi { dst, left, right } => unsafe {
+        iadd { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_i32(left + right));
+        }
+        imul { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            let right = frame.read_unchecked(right).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left * right));
+        }
+        idiv { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            let right = frame.read_unchecked(right).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left / right));
+        }
+        imod { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            let right = frame.read_unchecked(right).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left % right));
+        }
+        ieq { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            let right = frame.read_unchecked(right).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_bool(left == right));
+        }
+        jtr { src, off } => unsafe {
+            let bool = frame.read_unchecked(src).as_bool_unchecked();
+            if bool {
+                ip.offset(off as isize)
+            }
+        }
+        jmp { _pad, off } => unsafe {
+            ip.offset(off as isize)
         }
         ret { src } => unsafe {
             let value = frame.read_unchecked(src);
@@ -227,21 +254,22 @@ define! {
 }
 
 struct VirtualMachine {
-    state: VMStateInner
+    registers: Vec<Value>,
+    call_stack: Vec<CallFrame>,
 }
 
 impl VirtualMachine {
     fn new() -> Self {
         VirtualMachine {
-            state: VMStateInner::new()
+            registers: vec![],
+            call_stack: vec![]
         }
     }
     
     fn execute(&mut self, function: &Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.required_registers as usize);
         unsafe {
-            
-            let (ip, mut frame) = VMState(&mut self.state).initial_call_frame(function);
+            let (ip, mut frame) = VMState(self).initial_call_frame(function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
@@ -251,17 +279,47 @@ impl VirtualMachine {
 }
 
 fn main() {
+    use Instruction::*;
+    
     let function = Function {
         required_registers: 2,
         instructions: vec![
             // Instruction::lzi16 { dst: 0, imm: 3 },
-            Instruction::lzi16 { dst: 1, imm: 7 },
-            Instruction::addi { dst: 0, left: 0, right: 1 },
-            Instruction::ret { src: 0 }
+            lzi16 { dst: 1, imm: 0 },
+            
+            lzi16 { dst: 2, imm: 1 },
+            ieq { dst: 2, left: 0, right: 2 },
+            jtr { src: 2, off: 15 },
+            
+            lzi16 { dst: 2, imm: 2 },
+            imod { dst: 2, left: 0, right: 2 },
+            lzi16 { dst: 3, imm: 1 },
+            ieq { dst: 2, left: 2, right: 3 },
+            jtr { src: 2, off: 3 },
+            
+            lzi16 { dst: 2, imm: 2 },
+            idiv { dst: 0, left: 0, right: 2 },
+            jmp { _pad: 0, off: 4 },
+            
+            lzi16 { dst: 2, imm: 3 },
+            imul { dst: 0, left: 0, right: 2 },
+            lzi16 { dst: 2, imm: 1 },
+            iadd { dst: 0, left: 0, right: 2},
+            
+            lzi16 { dst: 2, imm: 1 },
+            iadd { dst: 1, left: 1, right: 2},
+            jmp { _pad: 0, off: -18 },
+            
+            ret { src: 1 }
         ].into()
     };
     
     let mut vm = VirtualMachine::new();
-    let result = vm.execute(&function, &[Value::from_i32(3)]);
-    dbg!(result.unwrap().unwrap());
+    
+    let start = Instant::now();
+    for _ in 0..10000 {
+        let result = vm.execute(&function, &[Value::from_i32(6171)]);
+        assert!(matches!(result.unwrap().unwrap(), UnwrappedValue::Integer(261)));
+    }
+    println!("Took {:?}", start.elapsed());
 }
