@@ -27,7 +27,7 @@ impl InstrPtr {
             *self.0
         }
     }
-    
+
     unsafe fn offset(&mut self, amount: isize) {
         unsafe { self.0 = self.0.offset(amount) };
     }
@@ -106,14 +106,14 @@ macro_rules! generate_instructions {
         $vis enum $instrs {
             $($instr $({ $($field: $ty),* })?),*
         }
-        
+
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone)]
         #[repr(u8)]
         $vis enum $opcode {
             $($instr),*
         }
-        
+
         impl $instrs {
             pub fn code(self) -> $opcode {
                 unsafe { (&self as *const $instrs as *const $opcode).read() }
@@ -144,22 +144,26 @@ generate_instructions! {
 
 type DispatchResult = Result<Value, ()>;
 
-// macro_rules! define {
-//     { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:pat => $body:expr )* } } => {
-//         $vis unsafe fn $name(mut $ip: $ip_ty, mut $frame: $frame_ty) -> $ret {
-//             let mut instr = unsafe { $ip.get() }; 
-//             loop {
-//                 match instr {
-//                     $(
-//                         $op { $(field),* } => $body
-//                     ),*
-//                 }
-//                 instr = unsafe { $ip.advance() }
-//             }
-//         }
-//     };
-// }
+#[cfg(not(feature = "threaded-loop"))]
+macro_rules! define {
+    { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
+        $vis unsafe fn $name(mut $ip: $ip_ty, mut $frame: $frame_ty) -> $ret {
+            let mut instr = unsafe { $ip.get() };
+            loop {
+                match instr {
+                    $(
+                        Instruction::$op { $($field),* } => { 
+                            $body;
+                        }
+                    ),*
+                }
+                instr = unsafe { $ip.advance() };
+            }
+        }
+    };
+}
 
+#[cfg(feature = "threaded-loop")]
 macro_rules! define {
     { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
         const _: () = {
@@ -170,40 +174,43 @@ macro_rules! define {
                 }
             }
         };
-        
-        type DispatchFn = unsafe fn(Instruction, $ip_ty, $frame_ty) -> $ret;
-        const DISPATCH_TABLE: [Option<DispatchFn>; 256] = const { 
-            let mut table: [Option<DispatchFn>; 256] = [None; 256];
+
+        type DispatchFn = for<'a> unsafe fn(&'a DispatchTable, $ip_ty, $frame_ty) -> $ret;
+        struct DispatchTable([Option<DispatchFn>; 256]);
+        const DISPATCH_TABLE: DispatchTable = const {
+            let mut table: DispatchTable = DispatchTable([None; 256]);
             $(
-            table[InstructionCode::$op as usize] = Some(|instr, #[allow(unused_variables, unused_mut)] mut $ip: $ip_ty, #[allow(unused_variables, unused_mut)] mut $frame: $frame_ty| -> $ret {
+            table.0[InstructionCode::$op as usize] = Some(|#[allow(unused_variables)] table: &DispatchTable, #[allow(unused_variables, unused_mut)] mut $ip: $ip_ty, #[allow(unused_variables, unused_mut)] mut $frame: $frame_ty| -> $ret {
+                let instr = unsafe { $ip.get() };
                 let Instruction::$op { $($field),* } = instr else { unsafe { std::hint::unreachable_unchecked() } };
                 $body;
                 #[allow(unreachable_code)]
-                unsafe { dispatch($ip, $frame) } 
+                unsafe { dispatch(table, $ip, $frame) }
             });
             )*
             table
         };
-        
-        unsafe fn dispatch(mut instr_ptr: $ip_ty, frame: $frame_ty) -> $ret {
+
+        unsafe fn dispatch(table: &DispatchTable, mut instr_ptr: $ip_ty, frame: $frame_ty) -> $ret {
             unsafe {
                 let instr = instr_ptr.advance();
-                DISPATCH_TABLE.get_unchecked(instr.code().bits() as usize).unwrap_unchecked()(instr, instr_ptr, frame)
+                let index = instr.code().bits();
+                table.0.get_unchecked(index as usize).unwrap_unchecked()(table, instr_ptr, frame)
             }
         }
-        
+
         unsafe fn $name($ip: $ip_ty, $frame: $frame_ty) -> $ret {
             unsafe {
                 let instr = $ip.get();
-        
-                DISPATCH_TABLE.get_unchecked(instr.code().bits() as usize).unwrap_unchecked()(instr, $ip, $frame)
+
+                DISPATCH_TABLE.0.get_unchecked(instr.code().bits() as usize).unwrap_unchecked()(&DISPATCH_TABLE, $ip, $frame)
             }
         }
     };
 }
 
 
-define! { 
+define! {
     unsafe fn execute(ip: InstrPtr, frame: Context) -> DispatchResult {
         lzi16 { dst, imm } => unsafe {
             frame.write_unchecked(dst, Value::from_i32(imm as u32 as i32));
@@ -265,7 +272,8 @@ impl VirtualMachine {
             call_stack: vec![]
         }
     }
-    
+
+    #[inline(never)]
     fn execute(&mut self, function: &Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.required_registers as usize);
         unsafe {
@@ -280,46 +288,52 @@ impl VirtualMachine {
 
 fn main() {
     use Instruction::*;
-    
-    let function = Function {
+
+    let function = std::hint::black_box(Function {
         required_registers: 2,
         instructions: vec![
             // Instruction::lzi16 { dst: 0, imm: 3 },
             lzi16 { dst: 1, imm: 0 },
-            
+
             lzi16 { dst: 2, imm: 1 },
             ieq { dst: 2, left: 0, right: 2 },
             jtr { src: 2, off: 15 },
-            
+
             lzi16 { dst: 2, imm: 2 },
             imod { dst: 2, left: 0, right: 2 },
             lzi16 { dst: 3, imm: 1 },
             ieq { dst: 2, left: 2, right: 3 },
             jtr { src: 2, off: 3 },
-            
+
             lzi16 { dst: 2, imm: 2 },
             idiv { dst: 0, left: 0, right: 2 },
             jmp { _pad: 0, off: 4 },
-            
+
             lzi16 { dst: 2, imm: 3 },
             imul { dst: 0, left: 0, right: 2 },
             lzi16 { dst: 2, imm: 1 },
             iadd { dst: 0, left: 0, right: 2},
-            
+
             lzi16 { dst: 2, imm: 1 },
             iadd { dst: 1, left: 1, right: 2},
             jmp { _pad: 0, off: -18 },
-            
+
             ret { src: 1 }
         ].into()
-    };
-    
+    });
+
     let mut vm = VirtualMachine::new();
-    
+
     let start = Instant::now();
     for _ in 0..10000 {
         let result = vm.execute(&function, &[Value::from_i32(6171)]);
         assert!(matches!(result.unwrap().unwrap(), UnwrappedValue::Integer(261)));
     }
-    println!("Took {:?}", start.elapsed());
+    
+    let feature = if cfg!(feature = "threaded-loop") {
+        "Threaded Loop"
+    } else {
+        "Match"
+    };
+    println!("(Using {feature}) Took {:?}", start.elapsed());
 }

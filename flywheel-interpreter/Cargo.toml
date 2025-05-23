@@ -3,6 +3,9 @@ name = "hikari"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+threaded-loop = []
+
 [profile.dev]
 opt-level = 1
 
