@@ -276,13 +276,16 @@ impl VirtualMachine {
     #[inline(never)]
     fn execute(&mut self, function: &Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.required_registers as usize);
-        unsafe {
+        let result = unsafe {
             let (ip, mut frame) = VMState(self).initial_call_frame(function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
             execute(ip, frame)
-        }
+        };
+        assert!(self.registers.is_empty());
+        assert!(self.call_stack.is_empty());
+        result
     }
 }
 
@@ -290,7 +293,7 @@ fn main() {
     use Instruction::*;
 
     let function = std::hint::black_box(Function {
-        required_registers: 2,
+        required_registers: 4,
         instructions: vec![
             // Instruction::lzi16 { dst: 0, imm: 3 },
             lzi16 { dst: 1, imm: 0 },
@@ -336,4 +339,53 @@ fn main() {
         "Match"
     };
     println!("(Using {feature}) Took {:?}", start.elapsed());
+}
+
+
+#[cfg(test)]
+mod test {
+    use crate::{Function, VirtualMachine};
+    use crate::value::{UnwrappedValue, Value};
+
+    #[test]
+    fn test_collatz() {
+        use crate::Instruction::*;
+
+        let function = std::hint::black_box(Function {
+            required_registers: 4,
+            instructions: vec![
+                lzi16 { dst: 1, imm: 0 },
+
+                lzi16 { dst: 2, imm: 1 },
+                ieq { dst: 2, left: 0, right: 2 },
+                jtr { src: 2, off: 15 },
+
+                lzi16 { dst: 2, imm: 2 },
+                imod { dst: 2, left: 0, right: 2 },
+                lzi16 { dst: 3, imm: 1 },
+                ieq { dst: 2, left: 2, right: 3 },
+                jtr { src: 2, off: 3 },
+
+                lzi16 { dst: 2, imm: 2 },
+                idiv { dst: 0, left: 0, right: 2 },
+                jmp { _pad: 0, off: 4 },
+
+                lzi16 { dst: 2, imm: 3 },
+                imul { dst: 0, left: 0, right: 2 },
+                lzi16 { dst: 2, imm: 1 },
+                iadd { dst: 0, left: 0, right: 2},
+
+                lzi16 { dst: 2, imm: 1 },
+                iadd { dst: 1, left: 1, right: 2},
+                jmp { _pad: 0, off: -18 },
+
+                ret { src: 1 }
+            ].into()
+        });
+
+        let mut vm = VirtualMachine::new();
+
+        let result = vm.execute(&function, &[Value::from_i32(6171)]);
+        assert!(matches!(result.unwrap().unwrap(), UnwrappedValue::Integer(261)));
+    }
 }
