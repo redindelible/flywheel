@@ -1,6 +1,8 @@
 use triomphe::{Arc, ArcBorrow};
 use crate::ast::TopLevel;
-use crate::source::SourceID;
+use crate::id::AstId;
+use crate::source::{Location, SourceID};
+use crate::table::AstTable;
 use crate::utils::{InternedString, Interner};
 use crate::utils::pretty_tree::{AsDebugTree, PrettyOptions, PrettyTree};
 
@@ -8,16 +10,22 @@ pub struct FileAST {
     pub source_id: SourceID,
     pub strings: Arc<Interner>,
     pub top_levels: Vec<TopLevel>,
+    pub locations: AstTable<Location>
 }
 
 impl FileAST {
-    pub(super) fn new(source_id: SourceID, strings: Arc<Interner>, top_levels: Vec<TopLevel>) -> FileAST
+    pub(super) fn new(source_id: SourceID, strings: Arc<Interner>, top_levels: Vec<TopLevel>, locations: AstTable<Location>) -> FileAST
     {
         FileAST {
             source_id,
             strings,
             top_levels,
+            locations
         }
+    }
+    
+    pub fn get_location(&self, ast_id: AstId) -> Option<Location> {
+        self.locations.get(&ast_id).map(|x| *x)
     }
 
     pub fn strings(&self) -> ArcBorrow<'_, Interner> {
@@ -35,11 +43,6 @@ impl FileAST {
     pub fn top_levels(&self) -> &[TopLevel] {
         &self.top_levels
     }
-
-    /*fn to_tree<T: Pretty>(&self, node: AstRef<T>) -> PrettyNode {
-        let location = self.get_location(node);
-        self.get_node(node).to_tree(self, location)
-    }*/
 }
 
 impl FileAST {

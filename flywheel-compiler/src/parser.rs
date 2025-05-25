@@ -1,18 +1,26 @@
 use std::collections::HashSet;
-
 use triomphe::Arc;
-
-use crate::ast::{self, BinaryOp};
+use crate::ast;
+use crate::ast::ast_struct::Struct;
+use crate::ast::ast_type::Type;
+use crate::ast::binary::BinaryOp;
+use crate::ast::block::Block;
+use crate::ast::Expression;
+use crate::ast::function::Function;
+use crate::ast::import::Import;
+use crate::ast::statement::Statement;
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
 use crate::file_ast::FileAST;
+use crate::id::AstId;
+use crate::id::beacon::Beacon;
+use crate::id::has_id::HasId;
 use crate::lexer::{Lexer, LexerShared};
 use crate::query::Processor;
 use crate::source::{Location, SourceID};
+use crate::table::AstTable;
 use crate::token::{Token, TokenStream, TokenType};
-use crate::utils::beacon::Beacon;
 use crate::utils::Interner;
-use crate::utils::located::Located;
 
 pub struct Parse(LexerShared);
 
@@ -34,7 +42,7 @@ impl Processor for Parse {
         let mut parser = Parser::new(lexer);
 
         match parser.parse_file() {
-            Ok(top_levels) => Ok(FileAST::new(source.id(), strings.0.interner().clone_arc(), top_levels)),
+            Ok(top_levels) => Ok(FileAST::new(source.id(), strings.0.interner().clone_arc(), top_levels,parser.locations)),
             Err(_) => Err(parser.error.unwrap())
         }
     }
@@ -71,6 +79,7 @@ struct Parser<L> {
     token_stream: L,
     last: Option<Token>,
     curr: Option<Token>,
+    locations: AstTable<Location>,
 
     possible_tokens: HashSet<TokenType>,
     error: Option<CompileError>,
@@ -79,7 +88,7 @@ struct Parser<L> {
 impl<L: TokenStream> Parser<L> {
     fn new(mut lexer: L) -> Self {
         let curr = lexer.next();
-        Parser { token_stream: lexer, last: None, curr, possible_tokens: HashSet::new(), error: None }
+        Parser { token_stream: lexer, last: None, curr, possible_tokens: HashSet::new(), error: None, locations: AstTable::new() }
     }
 
     fn advance(&mut self) -> Token {
@@ -113,6 +122,17 @@ impl<L: TokenStream> Parser<L> {
     fn error<T>(&mut self, error: CompileError) -> ParseResult<T> {
         self.error = Some(error);
         Err(0)
+    }
+
+    /// Tracks the location of `of` by wrapping it in a `Beacon`
+    fn track_location<T>(&mut self, of: T, location: Location) -> Beacon<T> {
+        let beacon = Beacon::new(of);
+        self.locations.insert(beacon.id(), location);
+        beacon
+    }
+
+    fn fetch_location(&mut self, id: AstId) -> Location {
+        *self.locations.get(&id).unwrap()
     }
 
     fn error_expected_none<T>(&mut self) -> ParseResult<T> {
@@ -154,17 +174,17 @@ impl<L: TokenStream> Parser<L> {
         }
     }
 
-    fn parse_import(&mut self) -> ParseResult<ast::Import> {
+    fn parse_import(&mut self) -> ParseResult<Beacon<Import>> {
         let start = self.expect(TokenType::Import)?;
         let path = self.expect(TokenType::String)?.text.unwrap();
         let end = self.expect(TokenType::Semicolon)?;
 
-        Ok(ast::Import { relative_path: path, location: start.location.combine(end.location) } )
+        Ok(self.track_location(Import { relative_path: path },  start.location.combine(end.location)))
     }
 
-    fn parse_struct(&mut self) -> ParseResult<ast::Struct> {
+    fn parse_struct(&mut self) -> ParseResult<Beacon<Struct>> {
         let start = self.expect(TokenType::Struct)?;
-        let name = self.expect(TokenType::Identifier)?.text.unwrap();
+        let name = self.expect(TokenType::Identifier)?;
 
         let mut fields = Vec::new();
         self.expect(TokenType::LeftCurlyBrace)?;
@@ -173,21 +193,25 @@ impl<L: TokenStream> Parser<L> {
         }
         let end = self.expect(TokenType::RightCurlyBrace)?;
 
-        Ok(ast::Struct { name, fields, location: start.location.combine(end.location) }, )
+        let name = self.track_location(name.text.unwrap(), name.location);
+        Ok(self.track_location(Struct { name, fields, }, start.location.combine(end.location)))
     }
 
-    fn parse_field(&mut self) -> ParseResult<ast::StructField> {
+    fn parse_field(&mut self) -> ParseResult<Beacon<ast::ast_struct::Field>> {
         let name = self.expect(TokenType::Identifier)?;
         self.expect(TokenType::Colon)?;
         let ty = self.parse_type()?;
         let end = self.expect(TokenType::Semicolon)?;
+        let location = name.location.combine(end.location);
 
-        Ok(ast::StructField { name: name.text.unwrap(), ty, location: name.location.combine(end.location) })
+        let name = self.track_location(name.text.unwrap(), name.location);
+        Ok(self.track_location(ast::ast_struct::Field { name, ty }, location))
     }
 
-    fn parse_function(&mut self) -> ParseResult<ast::Function> {
+    fn parse_function(&mut self) -> ParseResult<Beacon<Function>> {
         let start = self.expect(TokenType::Fn)?;
-        let name = self.expect(TokenType::Identifier)?.text.unwrap();
+        let name_token = self.expect(TokenType::Identifier)?;
+        let name = name_token.text.unwrap();
 
         self.expect(TokenType::LeftParenthesis)?;
         self.expect(TokenType::RightParenthesis)?;
@@ -195,21 +219,22 @@ impl<L: TokenStream> Parser<L> {
 
         let return_type = self.parse_type()?;
         let body = self.parse_block()?;
-        let loc = start.location.combine(return_type.location());
+        let loc = start.location.combine(self.fetch_location(return_type.id()));
 
-        Ok(ast::Function { name, return_type, body, location: loc })
+        let name = self.track_location(name, name_token.location);
+        Ok(self.track_location(Function { name, return_type, body}, loc))
     }
 
-    fn parse_block(&mut self) -> ParseResult<ast::Block> {
+    fn parse_block(&mut self) -> ParseResult<Beacon<Block>> {
         let start = self.expect(TokenType::LeftCurlyBrace)?;
 
         let mut statements = Vec::new();
-        let mut trailing_expr: Option<ast::Expression> = None;
+        let mut trailing_expr: Option<Expression> = None;
 
         while !self.current_is_type(TokenType::RightCurlyBrace) {
             if let Some(expr) = trailing_expr.take() {
-                let location = expr.location();
-                statements.push(Beacon::new(ast::Statement::Expr(expr), location));
+                let location = self.fetch_location(expr.id());
+                statements.push(self.track_location(Statement::Expr(expr), location));
             }
 
             let maybe_stmt = self.parse_statement()?;
@@ -221,9 +246,9 @@ impl<L: TokenStream> Parser<L> {
             }
         }
         let end = self.expect(TokenType::RightCurlyBrace)?;
-        Ok(ast::Block { statements, trailing_expr, location: start.location.combine(end.location)})
+        Ok(self.track_location(Block { statements, trailing_expr}, start.location.combine(end.location)))
     }
-    fn parse_let(&mut self) -> ParseResult<Option<Beacon<ast::Statement>>> {
+    fn parse_let(&mut self) -> ParseResult<Option<Beacon<Statement>>> {
         let start = self.expect(TokenType::Let)?;
         let name = self.expect(TokenType::Identifier)?;
         let ty = if self.current_is_type(TokenType::Colon) {
@@ -235,9 +260,10 @@ impl<L: TokenStream> Parser<L> {
         self.expect(TokenType::Equal)?;
         let value = self.parse_expr()?;
         let end = self.expect(TokenType::Semicolon)?;
+        let name = self.track_location(name.text.unwrap(), name.location);
         Ok(Some(
-            Beacon::new(ast::Statement::Let {
-                name: Beacon::new(name.text.unwrap(), name.location),
+            self.track_location(Statement::Let {
+                name,
                 ty,
                 value
             }, start.location.combine(end.location))
@@ -245,30 +271,30 @@ impl<L: TokenStream> Parser<L> {
 
     }
 
-    fn parse_while(&mut self) -> ParseResult<Option<Beacon<ast::Statement>>> {
+    fn parse_while(&mut self) -> ParseResult<Option<Beacon<Statement>>> {
         let start = self.expect(TokenType::While)?;
         let condition = self.parse_expr()?;
         let body = self.parse_block()?;
         let end = if self.current_is_type(TokenType::Semicolon) {
             self.advance().location
         } else {
-            body.location
+            self.fetch_location(body.id())
         };
 
         Ok(Some(
-            Beacon::new(ast::Statement::While { condition, body }, start.location.combine(end))
+            self.track_location(Statement::While { condition, body }, start.location.combine(end))
         ))
     }
 
-    fn parse_return(&mut self) -> ParseResult<Option<Beacon<ast::Statement>>> {
+    fn parse_return(&mut self) -> ParseResult<Option<Beacon<Statement>>> {
         let start = self.expect(TokenType::Return)?;
         let expr = self.parse_expr()?;
         let end = self.expect(TokenType::Semicolon)?;
         Ok(Some(
-            Beacon::new(ast::Statement::Return(expr), start.location.combine(end.location))
+            self.track_location(Statement::Return(expr), start.location.combine(end.location))
         ))
     }
-    fn parse_statement(&mut self) -> ParseResult<Option<Beacon<ast::Statement>>> {
+    fn parse_statement(&mut self) -> ParseResult<Option<Beacon<Statement>>> {
         match self.current_type() {
             TokenType::Let => self.parse_let(),
             TokenType::While => self.parse_while(),
@@ -277,15 +303,15 @@ impl<L: TokenStream> Parser<L> {
         }
     }
 
-    pub fn parse_expr(&mut self) -> ParseResult<ast::Expression> {
+    pub fn parse_expr(&mut self) -> ParseResult<Expression> {
         self.parse_expr_add()
     }
 
-    fn parse_expr_add(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_expr_add(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_expr_mul()?;
         loop {
-            let current = self.copy_current();
-            let op = match current.ty {
+            let maybe_operator = self.copy_current();
+            let op = match maybe_operator.ty {
                 TokenType::Plus => BinaryOp::Add,
                 TokenType::Minus => BinaryOp::Sub,
                 _ => break
@@ -293,12 +319,12 @@ impl<L: TokenStream> Parser<L> {
 
             self.advance();
             let right = self.parse_expr()?;
-            left = ast::Expression::binary(Beacon::new(op, current.location), left, right)
+            left = Expression::binary(self.track_location(op, maybe_operator.location), left, right)
         }
         Ok(left)
     }
 
-    fn parse_expr_mul(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_expr_mul(&mut self) -> ParseResult<Expression> {
         let left = self.parse_attribute_access()?;
         // loop {
         //     break;
@@ -306,15 +332,15 @@ impl<L: TokenStream> Parser<L> {
         Ok(left)
     }
 
-    fn parse_attribute(&mut self, on: ast::Expression) -> ParseResult<ast::Expression> {
+    fn parse_attribute(&mut self, on: Expression) -> ParseResult<Expression> {
         self.expect(TokenType::Period)?;
         let attribute = self.expect(TokenType::Identifier)?;
         Ok(
-            ast::Expression::attribute(on, attribute.text.unwrap())
+            Expression::attribute(on, attribute.text.unwrap())
         )
     }
 
-    fn parse_call(&mut self, callee: ast::Expression) -> ParseResult<ast::Expression> {
+    fn parse_call(&mut self, callee: Expression) -> ParseResult<Expression> {
         self.advance();
         let mut arguments = Vec::new();
         while !self.current_is_type(TokenType::RightParenthesis) {
@@ -326,10 +352,10 @@ impl<L: TokenStream> Parser<L> {
             }
         }
 
-        Ok(ast::Expression::call(callee, arguments))
+        Ok(Expression::call(callee, arguments))
     }
 
-    fn parse_attribute_access(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_attribute_access(&mut self) -> ParseResult<Expression> {
         let mut left = self.parse_expr_terminal()?;
 
         loop {
@@ -342,17 +368,17 @@ impl<L: TokenStream> Parser<L> {
         Ok(left)
     }
 
-    fn parse_identifier(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_identifier(&mut self) -> ParseResult<Expression> {
         let name = self.expect(TokenType::Identifier)?;
-        Ok(ast::Expression::Name(Beacon::new(name.text.unwrap(), name.location)))
+        Ok(Expression::Name(self.track_location(name.text.unwrap(), name.location)))
     }
 
-    fn parse_integer(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_integer(&mut self) -> ParseResult<Expression> {
         let numeric_token = self.expect(TokenType::Integer)?;
         let number = self.token_stream.interner().resolve(numeric_token.text.unwrap()).parse::<i64>();
         match number {
-            Ok(number) => Ok(ast::Expression::Integer(Beacon::new(number, numeric_token.location))),
-            Err(_) => self.error(error_integer_too_big(numeric_token.location)),
+            Ok(n) => Ok(Expression::Integer(self.track_location(n, numeric_token.location))),
+            Err(_) => self.error(error_integer_too_big(numeric_token.location))
         }
     }
 
@@ -364,7 +390,7 @@ impl<L: TokenStream> Parser<L> {
         Ok(expr)
     }
 
-    fn parse_if(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_if(&mut self) -> ParseResult<Expression> {
         // skip over the if.
         self.expect(TokenType::If)?;
         let condition = if self.current_is_type(TokenType::LeftParenthesis) {
@@ -383,23 +409,23 @@ impl<L: TokenStream> Parser<L> {
         } else {
             None
         };
-        Ok(ast::Expression::if_else(condition, then_do, else_do))
+        Ok(Expression::if_else(condition, then_do, else_do))
     }
 
-    fn parse_expr_terminal(&mut self) -> ParseResult<ast::Expression> {
+    fn parse_expr_terminal(&mut self) -> ParseResult<Expression> {
         match self.current_type() {
             TokenType::Identifier => self.parse_identifier(),
             TokenType::Integer => self.parse_integer(),
-            TokenType::LeftCurlyBrace => Ok(ast::Expression::block(self.parse_block()?)),
+            TokenType::LeftCurlyBrace => Ok(Expression::Block(self.parse_block()?)),
             TokenType::LeftParenthesis => self.parse_parenthesized_expression(),
             TokenType::If => self.parse_if(),
             _ => self.error_expected_none()
         }
     }
 
-    fn parse_type(&mut self) -> ParseResult<Beacon<ast::Type>> {
+    fn parse_type(&mut self) -> ParseResult<Beacon<Type>> {
         let token = self.expect(TokenType::Identifier)?;
-        Ok(Beacon::new(ast::Type::Name(token.text.unwrap()), token.location))
+        Ok(self.track_location(Type::Name(token.text.unwrap()), token.location))
     }
 }
 

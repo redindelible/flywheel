@@ -9,5 +9,8 @@ mod token;
 mod type_check;
 mod utils;
 pub mod file_ast;
+mod id;
+mod table;
+mod located;
 
 pub use driver::FrontendDriver;
