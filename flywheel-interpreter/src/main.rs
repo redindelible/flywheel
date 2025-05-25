@@ -139,10 +139,7 @@ trait Instruction: Sized {
     fn from_repr(repr: Self::Repr) -> Self;
 
     unsafe fn from_ptr(ptr: *const u32) -> Self {
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(ptr.cast::<u8>(), size_of::<Self::Repr>())
-        };
-        Self::from_repr(*bytemuck::from_bytes(bytes))
+        Self::from_repr(unsafe { ptr.cast::<Self::Repr>().read() })
     }
 }
 
@@ -169,6 +166,15 @@ struct RegRegReg {
     r1: u8,
     r2: u8,
     r3: u8,
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C, align(4))]
+struct RegRegImm8 {
+    opcode: u8,
+    r1: u8,
+    r2: u8,
+    imm8: i8,
 }
 
 macro_rules! _generate_instruction {
@@ -245,6 +251,30 @@ macro_rules! _generate_instruction {
             }
         }
     };
+    
+    {$instr:ident $opcode:ident r1: $r1:ident, r2: $r2:ident, imm8: $imm8:ident} => {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone)]
+        pub struct $instr {
+            pub $r1: u8, pub $r2: u8, pub $imm8: i8
+        }
+
+        impl $crate::Instruction for $instr {
+            type Repr = $crate::RegRegImm8;
+
+            fn registers(&self) -> impl IntoIterator<Item=u8> {
+                [self.$r1, self.$r2]
+            }
+
+            fn to_repr(self) -> Self::Repr {
+                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, r2: self.$r2, imm8: self.$imm8 }
+            }
+
+            fn from_repr(repr: Self::Repr) -> Self {
+                Self { $r1: repr.r1, $r2: repr.r2, $imm8: repr.imm8 }
+            }
+        }
+    };
 }
 
 
@@ -272,11 +302,16 @@ macro_rules! generate_instructions {
 generate_instructions! {
     pub mod instrs(enum InstructionCode) {
         lzi16 { r1: dst, imm16: imm },              // Load integer from 16 bit immediate zero-extended to 32 bits
-        iadd { r1: dst, r2: left, r3: right },
-        imul { r1: dst, r2: left, r3: right },
-        idiv { r1: dst, r2: left, r3: right },
-        imod { r1: dst, r2: left, r3: right },
-        ieq { r1: dst, r2: left, r3: right },
+        iaddrr { r1: dst, r2: left, r3: right },
+        imulrr { r1: dst, r2: left, r3: right },
+        idivrr { r1: dst, r2: left, r3: right },
+        imodrr { r1: dst, r2: left, r3: right },
+        iaddri { r1: dst, r2: left, imm8: right },
+        imulri { r1: dst, r2: left, imm8: right },
+        idivri { r1: dst, r2: left, imm8: right },
+        imodri { r1: dst, r2: left, imm8: right },
+        ieqrr { r1: dst, r2: left, r3: right },
+        ieqri { r1: dst, r2: left, imm8: right },
         jtr { r1: src, off16: off },
         jmp { r1: _pad, off16: off },
         ret { r1: src, imm16: _pad }
@@ -357,39 +392,59 @@ define! {
         lzi16 { dst, imm } => unsafe {
             frame.write_unchecked(dst, Value::from_i32(imm as u32 as i32));
         }
-        iadd { dst, left, right } => unsafe {
+        iaddrr { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_i32(left + right));
         }
-        imul { dst, left, right } => unsafe {
+        imulrr { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_i32(left * right));
         }
-        idiv { dst, left, right } => unsafe {
+        idivrr { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_i32(left / right));
         }
-        imod { dst, left, right } => unsafe {
+        imodrr { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_i32(left % right));
         }
-        ieq { dst, left, right } => unsafe {
+        iaddri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left + (right as i32)));
+        }
+        imulri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left * (right as i32)));
+        }
+        idivri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left / (right as i32)));
+        }
+        imodri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_i32(left % (right as i32)));
+        }
+        ieqrr { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left).as_int_unchecked();
             let right = frame.read_unchecked(right).as_int_unchecked();
             frame.write_unchecked(dst, Value::from_bool(left == right));
         }
+        ieqri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left).as_int_unchecked();
+            frame.write_unchecked(dst, Value::from_bool(left == (right as i32)));
+        }
         jtr { src, off } => unsafe {
             let bool = frame.read_unchecked(src).as_bool_unchecked();
             if bool {
-                ip.offset(off as i16 as isize)
+                ip.offset(off as isize)
             }
         }
         jmp { _pad, off } => unsafe {
-            ip.offset(off as i16 as isize)
+            ip.offset(off as isize)
         }
         ret { src, _pad } => unsafe {
             let value = frame.read_unchecked(src);
@@ -436,24 +491,23 @@ fn main() {
 
     let function = Function::builder()
         .instr(lzi16 { dst: 1, imm: 0 })
-        .instr(lzi16 { dst: 2, imm: 1 })
-        .instr(ieq { dst: 2, left: 0, right: 2 })
-        .instr(jtr { src: 2, off: 15 })
-        .instr(lzi16 { dst: 2, imm: 2 })
-        .instr(imod { dst: 2, left: 0, right: 2 })
-        .instr(lzi16 { dst: 3, imm: 1 })
-        .instr(ieq { dst: 2, left: 2, right: 3 })
-        .instr(jtr { src: 2, off: 3 })
-        .instr(lzi16 { dst: 2, imm: 2 })
-        .instr(idiv { dst: 0, left: 0, right: 2 })
-        .instr(jmp { _pad: 0, off: 4 })
-        .instr(lzi16 { dst: 2, imm: 3 })
-        .instr(imul { dst: 0, left: 0, right: 2 })
-        .instr(lzi16 { dst: 2, imm: 1 })
-        .instr(iadd { dst: 0, left: 0, right: 2})
-        .instr(lzi16 { dst: 2, imm: 1 })
-        .instr(iadd { dst: 1, left: 1, right: 2})
-        .instr(jmp { _pad: 0, off: -18 })
+
+        .instr(ieqri { dst: 2, left: 0, right: 1 })
+        .instr(jtr { src: 2, off: 9 })
+
+        .instr(imodri { dst: 2, left: 0, right: 2 })
+        .instr(ieqri { dst: 2, left: 2, right: 1 })
+        .instr(jtr { src: 2, off: 2 })
+
+        .instr(idivri { dst: 0, left: 0, right: 2 })
+        .instr(jmp { _pad: 0, off: 2 })
+
+        .instr(imulri { dst: 0, left: 0, right: 3 })
+        .instr(iaddri { dst: 0, left: 0, right: 1 })
+
+        .instr(iaddri { dst: 1, left: 1, right: 1 })
+        .instr(jmp { _pad: 0, off: -11 })
+
         .instr(ret { src: 1, _pad: 0 })
         .finish();
 
@@ -462,7 +516,10 @@ fn main() {
     let start = Instant::now();
     for _ in 0..10000 {
         let result = vm.execute(&function, &[Value::from_i32(6171)]);
-        assert!(matches!(result.unwrap().unwrap(), UnwrappedValue::Integer(261)));
+        match result.unwrap().unwrap() {
+            UnwrappedValue::Integer(num) => assert_eq!(num, 261),
+            other => panic!("{:?}", other)
+        };
     }
     
     let feature = if cfg!(feature = "threaded-loop") {
@@ -477,7 +534,6 @@ fn main() {
 #[cfg(test)]
 mod test {
     use crate::{Function, VirtualMachine};
-    use crate::instrs::{iadd, idiv, ieq, imod, imul, jmp, jtr, lzi16, ret};
     use crate::value::{UnwrappedValue, Value};
 
     #[test]
@@ -486,30 +542,32 @@ mod test {
 
         let function = Function::builder()
             .instr(lzi16 { dst: 1, imm: 0 })
-            .instr(lzi16 { dst: 2, imm: 1 })
-            .instr(ieq { dst: 2, left: 0, right: 2 })
-            .instr(jtr { src: 2, off: 15 })
-            .instr(lzi16 { dst: 2, imm: 2 })
-            .instr(imod { dst: 2, left: 0, right: 2 })
-            .instr(lzi16 { dst: 3, imm: 1 })
-            .instr(ieq { dst: 2, left: 2, right: 3 })
-            .instr(jtr { src: 2, off: 3 })
-            .instr(lzi16 { dst: 2, imm: 2 })
-            .instr(idiv { dst: 0, left: 0, right: 2 })
-            .instr(jmp { _pad: 0, off: 4 })
-            .instr(lzi16 { dst: 2, imm: 3 })
-            .instr(imul { dst: 0, left: 0, right: 2 })
-            .instr(lzi16 { dst: 2, imm: 1 })
-            .instr(iadd { dst: 0, left: 0, right: 2})
-            .instr(lzi16 { dst: 2, imm: 1 })
-            .instr(iadd { dst: 1, left: 1, right: 2})
-            .instr(jmp { _pad: 0, off: -18 })
+            
+            .instr(ieqri { dst: 2, left: 0, right: 1 })
+            .instr(jtr { src: 2, off: 9 })
+            
+            .instr(imodri { dst: 2, left: 0, right: 2 })
+            .instr(ieqri { dst: 2, left: 2, right: 1 })
+            .instr(jtr { src: 2, off: 2 })
+            
+            .instr(idivri { dst: 0, left: 0, right: 2 })
+            .instr(jmp { _pad: 0, off: 2 })
+            
+            .instr(imulri { dst: 0, left: 0, right: 3 })
+            .instr(iaddri { dst: 0, left: 0, right: 1 })
+            
+            .instr(iaddri { dst: 1, left: 1, right: 1 })
+            .instr(jmp { _pad: 0, off: -11 })
+            
             .instr(ret { src: 1, _pad: 0 })
             .finish();
 
         let mut vm = VirtualMachine::new();
 
         let result = vm.execute(&function, &[Value::from_i32(6171)]);
-        assert!(matches!(result.unwrap().unwrap(), UnwrappedValue::Integer(261)));
+        match result.unwrap().unwrap() {
+            UnwrappedValue::Integer(num) => assert_eq!(num, 261),
+            other => panic!("{:?}", other)
+        };
     }
 }
