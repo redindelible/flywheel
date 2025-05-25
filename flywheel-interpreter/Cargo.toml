@@ -10,3 +10,4 @@ threaded-loop = []
 opt-level = 1
 
 [dependencies]
+bytemuck = { version = "1.23.0", features = ["derive"] }

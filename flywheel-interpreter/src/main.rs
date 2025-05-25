@@ -1,11 +1,45 @@
 mod value;
 
 use std::time::Instant;
+use bytemuck::{Pod, Zeroable};
 use crate::value::{UnwrappedValue, Value};
 
 struct Function {
     required_registers: u32,
-    instructions: Box<[Instruction]>
+    instructions: Box<[u32]>,
+    constants: Box<[u8]>
+}
+
+impl Function {
+    fn builder() -> FunctionBuilder {
+        FunctionBuilder { highest_register: 0, instructions: vec![], constants: vec![] }
+    }
+}
+
+struct FunctionBuilder {
+    highest_register: u32,
+    instructions: Vec<u32>,
+    constants: Vec<u8>
+}
+
+impl FunctionBuilder {
+    pub fn instr(&mut self, instr: impl Instruction) -> &mut Self {
+        for register in instr.registers() {
+            if register as u32 > self.highest_register {
+                self.highest_register = register as u32;
+            }
+        }
+        self.instructions.extend_from_slice(bytemuck::cast_slice(&[instr.to_repr()]));
+        self
+    }
+
+    pub fn finish(&mut self) -> Function {
+        Function {
+            required_registers: self.highest_register + 1,
+            instructions: std::mem::take(&mut self.instructions).into_boxed_slice(),
+            constants: std::mem::take(&mut self.constants).into_boxed_slice(),
+        }
+    }
 }
 
 struct CallFrame {
@@ -14,22 +48,21 @@ struct CallFrame {
 }
 
 #[derive(Copy, Clone)]
-struct InstrPtr(*const Instruction);
+struct InstrPtr(*const u32);
 
 impl InstrPtr {
-    unsafe fn get(&self) -> Instruction {
-        unsafe { *self.0 }
+    unsafe fn get_code(&self) -> InstructionCode {
+        unsafe { self.0.cast::<InstructionCode>().read() }
     }
 
-    unsafe fn advance(&mut self) -> Instruction {
+    unsafe fn advance(&mut self) {
         unsafe {
-            self.0 = self.0.add(1);
-            *self.0
+            self.0 = self.0.byte_add(4);
         }
     }
 
     unsafe fn offset(&mut self, amount: isize) {
-        unsafe { self.0 = self.0.offset(amount) };
+        unsafe { self.0 = self.0.byte_offset(amount * 4) };
     }
 }
 
@@ -97,14 +130,128 @@ impl<'a> Context<'a> {
     }
 }
 
+trait Instruction: Sized {
+    type Repr: Pod;
+
+    fn registers(&self) -> impl IntoIterator<Item=u8>;
+
+    fn to_repr(self) -> Self::Repr;
+    fn from_repr(repr: Self::Repr) -> Self;
+
+    unsafe fn from_ptr(ptr: *const u32) -> Self {
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(ptr.cast::<u8>(), size_of::<Self::Repr>())
+        };
+        Self::from_repr(*bytemuck::from_bytes(bytes))
+    }
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C, align(4))]
+struct RegImm16 {
+    opcode: u8,
+    r1: u8,
+    imm16: u16
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C, align(4))]
+struct RegOff16 {
+    opcode: u8,
+    r1: u8,
+    off16: i16
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C, align(4))]
+struct RegRegReg {
+    opcode: u8,
+    r1: u8,
+    r2: u8,
+    r3: u8,
+}
+
+macro_rules! _generate_instruction {
+    {$instr:ident $opcode:ident r1: $r1:ident, imm16: $imm16:ident} => {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone)]
+        pub struct $instr {
+            pub $r1: u8, pub $imm16: u16
+        }
+
+
+        impl $crate::Instruction for $instr {
+            type Repr = $crate::RegImm16;
+
+            fn registers(&self) -> impl IntoIterator<Item=u8> {
+                [self.$r1]
+            }
+
+            fn to_repr(self) -> Self::Repr {
+                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, imm16: self.$imm16 }
+            }
+
+            fn from_repr(repr: Self::Repr) -> Self {
+                Self { $r1: repr.r1, $imm16: repr.imm16 }
+            }
+        }
+    };
+    
+    {$instr:ident $opcode:ident r1: $r1:ident, off16: $off16:ident} => {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone)]
+        pub struct $instr {
+            pub $r1: u8, pub $off16: i16
+        }
+
+
+        impl $crate::Instruction for $instr {
+            type Repr = $crate::RegOff16;
+
+            fn registers(&self) -> impl IntoIterator<Item=u8> {
+                [self.$r1]
+            }
+
+            fn to_repr(self) -> Self::Repr {
+                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, off16: self.$off16 }
+            }
+
+            fn from_repr(repr: Self::Repr) -> Self {
+                Self { $r1: repr.r1, $off16: repr.off16 }
+            }
+        }
+    };
+
+    {$instr:ident $opcode:ident r1: $r1:ident, r2: $r2:ident, r3: $r3:ident} => {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone)]
+        pub struct $instr {
+            pub $r1: u8, pub $r2: u8, pub $r3: u8
+        }
+
+        impl $crate::Instruction for $instr {
+            type Repr = $crate::RegRegReg;
+
+            fn registers(&self) -> impl IntoIterator<Item=u8> {
+                [self.$r1, self.$r2, self.$r3]
+            }
+
+            fn to_repr(self) -> Self::Repr {
+                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, r2: self.$r2, r3: self.$r3 }
+            }
+
+            fn from_repr(repr: Self::Repr) -> Self {
+                Self { $r1: repr.r1, $r2: repr.r2, $r3: repr.r3 }
+            }
+        }
+    };
+}
+
 
 macro_rules! generate_instructions {
-    { $vis:vis enum $instrs:ident(enum $opcode:ident) { $( $instr:ident $({ $($field:ident : $ty:ty),* $(,)? })? ),* $(,)? } } => {
-        #[allow(non_camel_case_types)]
-        #[repr(u8)]
-        #[derive(Copy, Clone)]
-        $vis enum $instrs {
-            $($instr $({ $($field: $ty),* })?),*
+    { $vis:vis mod $instrs:ident(enum $opcode:ident) { $( $instr:ident { $($field:ident : $ty:ident),* $(,)? } ),* $(,)? } } => {
+        $vis mod $instrs {
+            $(_generate_instruction! { $instr $opcode $($field: $ty),* })*
         }
 
         #[allow(non_camel_case_types)]
@@ -112,12 +259,6 @@ macro_rules! generate_instructions {
         #[repr(u8)]
         $vis enum $opcode {
             $($instr),*
-        }
-
-        impl $instrs {
-            pub fn code(self) -> $opcode {
-                unsafe { (&self as *const $instrs as *const $opcode).read() }
-            }
         }
 
         impl $opcode {
@@ -129,16 +270,16 @@ macro_rules! generate_instructions {
 }
 
 generate_instructions! {
-    pub enum Instruction(enum InstructionCode) {
-        lzi16 { dst: u8, imm: u16 },  // Load integer from 16 bit immediate zero-extended to 32 bits
-        iadd { dst: u8, left: u8, right: u8 },
-        imul { dst: u8, left: u8, right: u8 },
-        idiv { dst: u8, left: u8, right: u8 },
-        imod { dst: u8, left: u8, right: u8 },
-        ieq { dst: u8, left: u8, right: u8 },
-        jtr { src: u8, off: i16 },
-        jmp { _pad: u8, off: i16 },
-        ret { src: u8 }
+    pub mod instrs(enum InstructionCode) {
+        lzi16 { r1: dst, imm16: imm },              // Load integer from 16 bit immediate zero-extended to 32 bits
+        iadd { r1: dst, r2: left, r3: right },
+        imul { r1: dst, r2: left, r3: right },
+        idiv { r1: dst, r2: left, r3: right },
+        imod { r1: dst, r2: left, r3: right },
+        ieq { r1: dst, r2: left, r3: right },
+        jtr { r1: src, off16: off },
+        jmp { r1: _pad, off16: off },
+        ret { r1: src, imm16: _pad }
     }
 }
 
@@ -148,16 +289,17 @@ type DispatchResult = Result<Value, ()>;
 macro_rules! define {
     { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
         $vis unsafe fn $name(mut $ip: $ip_ty, mut $frame: $frame_ty) -> $ret {
-            let mut instr = unsafe { $ip.get() };
             loop {
-                match instr {
+                let opcode = unsafe { $ip.get_code() };
+                match opcode {
                     $(
-                        Instruction::$op { $($field),* } => { 
+                        InstructionCode::$op => {
+                            let instrs::$op { $($field),* } = unsafe { instrs::$op::from_ptr($ip.0) };
                             $body;
                         }
                     ),*
                 }
-                instr = unsafe { $ip.advance() };
+                unsafe { $ip.advance() };
             }
         }
     };
@@ -243,13 +385,13 @@ define! {
         jtr { src, off } => unsafe {
             let bool = frame.read_unchecked(src).as_bool_unchecked();
             if bool {
-                ip.offset(off as isize)
+                ip.offset(off as i16 as isize)
             }
         }
         jmp { _pad, off } => unsafe {
-            ip.offset(off as isize)
+            ip.offset(off as i16 as isize)
         }
-        ret { src } => unsafe {
+        ret { src, _pad } => unsafe {
             let value = frame.read_unchecked(src);
             if let Some((_ip, _frame)) = frame.to_vm_state().pop_call_frame() {
                 todo!()
@@ -290,40 +432,30 @@ impl VirtualMachine {
 }
 
 fn main() {
-    use Instruction::*;
+    use instrs::*;
 
-    let function = std::hint::black_box(Function {
-        required_registers: 4,
-        instructions: vec![
-            // Instruction::lzi16 { dst: 0, imm: 3 },
-            lzi16 { dst: 1, imm: 0 },
-
-            lzi16 { dst: 2, imm: 1 },
-            ieq { dst: 2, left: 0, right: 2 },
-            jtr { src: 2, off: 15 },
-
-            lzi16 { dst: 2, imm: 2 },
-            imod { dst: 2, left: 0, right: 2 },
-            lzi16 { dst: 3, imm: 1 },
-            ieq { dst: 2, left: 2, right: 3 },
-            jtr { src: 2, off: 3 },
-
-            lzi16 { dst: 2, imm: 2 },
-            idiv { dst: 0, left: 0, right: 2 },
-            jmp { _pad: 0, off: 4 },
-
-            lzi16 { dst: 2, imm: 3 },
-            imul { dst: 0, left: 0, right: 2 },
-            lzi16 { dst: 2, imm: 1 },
-            iadd { dst: 0, left: 0, right: 2},
-
-            lzi16 { dst: 2, imm: 1 },
-            iadd { dst: 1, left: 1, right: 2},
-            jmp { _pad: 0, off: -18 },
-
-            ret { src: 1 }
-        ].into()
-    });
+    let function = Function::builder()
+        .instr(lzi16 { dst: 1, imm: 0 })
+        .instr(lzi16 { dst: 2, imm: 1 })
+        .instr(ieq { dst: 2, left: 0, right: 2 })
+        .instr(jtr { src: 2, off: 15 })
+        .instr(lzi16 { dst: 2, imm: 2 })
+        .instr(imod { dst: 2, left: 0, right: 2 })
+        .instr(lzi16 { dst: 3, imm: 1 })
+        .instr(ieq { dst: 2, left: 2, right: 3 })
+        .instr(jtr { src: 2, off: 3 })
+        .instr(lzi16 { dst: 2, imm: 2 })
+        .instr(idiv { dst: 0, left: 0, right: 2 })
+        .instr(jmp { _pad: 0, off: 4 })
+        .instr(lzi16 { dst: 2, imm: 3 })
+        .instr(imul { dst: 0, left: 0, right: 2 })
+        .instr(lzi16 { dst: 2, imm: 1 })
+        .instr(iadd { dst: 0, left: 0, right: 2})
+        .instr(lzi16 { dst: 2, imm: 1 })
+        .instr(iadd { dst: 1, left: 1, right: 2})
+        .instr(jmp { _pad: 0, off: -18 })
+        .instr(ret { src: 1, _pad: 0 })
+        .finish();
 
     let mut vm = VirtualMachine::new();
 
@@ -345,43 +477,35 @@ fn main() {
 #[cfg(test)]
 mod test {
     use crate::{Function, VirtualMachine};
+    use crate::instrs::{iadd, idiv, ieq, imod, imul, jmp, jtr, lzi16, ret};
     use crate::value::{UnwrappedValue, Value};
 
     #[test]
     fn test_collatz() {
-        use crate::Instruction::*;
+        use crate::instrs::*;
 
-        let function = std::hint::black_box(Function {
-            required_registers: 4,
-            instructions: vec![
-                lzi16 { dst: 1, imm: 0 },
-
-                lzi16 { dst: 2, imm: 1 },
-                ieq { dst: 2, left: 0, right: 2 },
-                jtr { src: 2, off: 15 },
-
-                lzi16 { dst: 2, imm: 2 },
-                imod { dst: 2, left: 0, right: 2 },
-                lzi16 { dst: 3, imm: 1 },
-                ieq { dst: 2, left: 2, right: 3 },
-                jtr { src: 2, off: 3 },
-
-                lzi16 { dst: 2, imm: 2 },
-                idiv { dst: 0, left: 0, right: 2 },
-                jmp { _pad: 0, off: 4 },
-
-                lzi16 { dst: 2, imm: 3 },
-                imul { dst: 0, left: 0, right: 2 },
-                lzi16 { dst: 2, imm: 1 },
-                iadd { dst: 0, left: 0, right: 2},
-
-                lzi16 { dst: 2, imm: 1 },
-                iadd { dst: 1, left: 1, right: 2},
-                jmp { _pad: 0, off: -18 },
-
-                ret { src: 1 }
-            ].into()
-        });
+        let function = Function::builder()
+            .instr(lzi16 { dst: 1, imm: 0 })
+            .instr(lzi16 { dst: 2, imm: 1 })
+            .instr(ieq { dst: 2, left: 0, right: 2 })
+            .instr(jtr { src: 2, off: 15 })
+            .instr(lzi16 { dst: 2, imm: 2 })
+            .instr(imod { dst: 2, left: 0, right: 2 })
+            .instr(lzi16 { dst: 3, imm: 1 })
+            .instr(ieq { dst: 2, left: 2, right: 3 })
+            .instr(jtr { src: 2, off: 3 })
+            .instr(lzi16 { dst: 2, imm: 2 })
+            .instr(idiv { dst: 0, left: 0, right: 2 })
+            .instr(jmp { _pad: 0, off: 4 })
+            .instr(lzi16 { dst: 2, imm: 3 })
+            .instr(imul { dst: 0, left: 0, right: 2 })
+            .instr(lzi16 { dst: 2, imm: 1 })
+            .instr(iadd { dst: 0, left: 0, right: 2})
+            .instr(lzi16 { dst: 2, imm: 1 })
+            .instr(iadd { dst: 1, left: 1, right: 2})
+            .instr(jmp { _pad: 0, off: -18 })
+            .instr(ret { src: 1, _pad: 0 })
+            .finish();
 
         let mut vm = VirtualMachine::new();
 
