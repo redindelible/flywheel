@@ -1,6 +1,9 @@
 mod value;
 mod instr;
 
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+use std::sync::Arc;
 use std::time::Instant;
 use crate::instr::{Instruction, InstructionCode, InstructionRepr};
 use crate::value::{UnwrappedValue, Value};
@@ -41,15 +44,19 @@ impl CodeChunkBuilder {
     }
 }
 
-struct CallFrame {
+struct CallFrame<'f> {
     registers_start: usize,
-    ip: InstrPtr
+    ip: InstrPtr<'f>
 }
 
 #[derive(Copy, Clone)]
-struct InstrPtr(*const u32);
+struct InstrPtr<'f>(NonNull<u32>, PhantomData<&'f u32>);
 
-impl InstrPtr {
+impl<'f> InstrPtr<'f> {
+    fn new(instrs: &'f [u32]) -> Self {
+        Self(NonNull::<[u32]>::from(instrs).cast::<u32>(), PhantomData)
+    }
+    
     unsafe fn get_code(&self) -> InstructionCode {
         unsafe { self.0.cast::<InstructionCode>().read() }
     }
@@ -65,14 +72,14 @@ impl InstrPtr {
     }
 }
 
-struct Context<'a> {
+struct Context<'vm, 'f> {
     registers_view: *mut Value,
-    vm_ref: &'a mut VirtualMachine
+    vm_ref: &'vm mut VirtualMachine<'f>
 }
 
 const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
 
-impl<'a> Context<'a> {
+impl<'vm, 'f> Context<'vm, 'f> {
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
         unsafe {
             let register = register.into();
@@ -86,7 +93,7 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn into_inner(self) -> &'a mut VirtualMachine {
+    fn into_inner(self) -> &'vm mut VirtualMachine<'f> {
         self.vm_ref
     }
 }
@@ -102,7 +109,7 @@ macro_rules! define {
                 match opcode {
                     $(
                         InstructionCode::$op => {
-                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($ip.0) };
+                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($ip.0.as_ptr()) };
                             $body;
                         }
                     ),*
@@ -230,12 +237,12 @@ define! {
     }
 }
 
-struct VirtualMachine {
+struct VirtualMachine<'f> {
     registers: Vec<Value>,
-    call_stack: Vec<CallFrame>,
+    call_stack: Vec<CallFrame<'f>>,
 }
 
-impl VirtualMachine {
+impl<'f> VirtualMachine<'f> {
     fn new() -> Self {
         VirtualMachine {
             registers: vec![],
@@ -244,8 +251,8 @@ impl VirtualMachine {
     }
 
     #[inline(never)]
-    fn execute(&mut self, function: &CodeChunk, args: &[Value]) -> Result<Value, ()> {
-        assert!(args.len() <= function.required_registers as usize);
+    fn execute(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
+        assert!(args.len() <= function.parameters as usize);
         let result = unsafe {
             let (ip, mut frame) = self.initial_call_frame(function);
             for (i, arg) in args.iter().copied().enumerate() {
@@ -258,9 +265,9 @@ impl VirtualMachine {
         result
     }
 
-    unsafe fn initial_call_frame(&mut self, function: *const CodeChunk) -> (InstrPtr, Context<'_>) {
-        let ip = unsafe { InstrPtr((*function).instructions.as_ptr()) };
-        let required = unsafe { (*function).required_registers };
+    unsafe fn initial_call_frame<'vm>(&'vm mut self, function: &'f Function) -> (InstrPtr<'f>, Context<'vm, 'f>) {
+        let ip = InstrPtr::new(&*function.code.instructions);
+        let required = function.code.required_registers;
 
         let start = self.registers.len();
         self.registers.extend(std::iter::repeat_n(Value::new_none(), required as usize));
@@ -273,14 +280,14 @@ impl VirtualMachine {
         (ip, Context { registers_view, vm_ref: self })
     }
 
-    unsafe fn push_call_frame(&mut self, ip: InstrPtr, function: *const CodeChunk) -> (InstrPtr, Context<'_>) {
+    unsafe fn push_call_frame<'vm>(&'vm mut self, ip: InstrPtr<'f>, function: &'f Function) -> (InstrPtr<'f>, Context<'vm, 'f>) {
         let current_call_frame = unsafe { self.call_stack.last_mut().unwrap_unchecked() };
         current_call_frame.ip = ip;
 
         unsafe { self.initial_call_frame(function) }
     }
 
-    unsafe fn pop_call_frame(&mut self) -> Option<(InstrPtr, Context<'_>)> {
+    unsafe fn pop_call_frame<'vm>(&'vm mut self) -> Option<(InstrPtr<'f>, Context<'vm, 'f>)> {
         let current = unsafe { self.call_stack.pop().unwrap_unchecked() };
         self.registers.drain(current.registers_start..);
         if let Some(frame) = self.call_stack.last() {
@@ -295,7 +302,8 @@ impl VirtualMachine {
 
 
 struct Function {
-
+    code: Arc<CodeChunk>,
+    parameters: u32
 }
 
 
@@ -307,7 +315,7 @@ struct Interpreter {
 fn main() {
     use instr::instrs::*;
 
-    let function = CodeChunk::builder()
+    let code = CodeChunk::builder()
         .instr(lzi16 { dst: 1, imm: 0 })
 
         .instr(ieqri { dst: 2, left: 0, right: 1 })
@@ -329,6 +337,8 @@ fn main() {
         .instr(ret { src: 1, _pad: 0 })
         .finish();
 
+    let function = Function { parameters: 1, code: Arc::new(code) };
+    
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
@@ -351,7 +361,8 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-    use crate::{CodeChunk, VirtualMachine};
+    use std::sync::Arc;
+    use crate::{CodeChunk, Function, VirtualMachine};
     use crate::value::{UnwrappedValue, Value};
 
     #[test]
@@ -379,6 +390,8 @@ mod test {
             
             .instr(ret { src: 1, _pad: 0 })
             .finish();
+        
+        let function = Function { code: Arc::new(function), parameters: 1 };
 
         let mut vm = VirtualMachine::new();
 
