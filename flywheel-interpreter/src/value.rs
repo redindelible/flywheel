@@ -1,3 +1,4 @@
+use std::hint::unreachable_unchecked;
 use std::ptr::NonNull;
 
 // use crate::gc::GcRef;
@@ -127,10 +128,16 @@ impl Value {
     }
     
     pub unsafe fn as_int_unchecked(self) -> i32 {
-        (self.0.addr() >> 3) as i32
+        match self.unwrap() {
+            UnwrappedValue::Integer(num) => num,
+            _ => unsafe { unreachable_unchecked() }
+        }
     }
 
     pub unsafe fn as_bool_unchecked(self) -> bool {
-        (self.0.addr() & 1) == 1
+        match self.unwrap() {
+            UnwrappedValue::Bool(value) => value,
+            _ => unsafe { unreachable_unchecked() }
+        }
     }
 }
