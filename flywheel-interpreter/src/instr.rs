@@ -1,168 +1,104 @@
 use bytemuck::{Pod, Zeroable};
 
-pub trait InstructionRepr: Pod {
-    fn registers(&self) -> impl IntoIterator<Item=u8>;
-}
-
-pub trait Instruction: Copy + Sized {
-    type Repr: InstructionRepr;
-
-    fn to_repr(self) -> Self::Repr;
-    fn from_repr(repr: Self::Repr) -> Self;
+pub trait Instruction<const WORDS: usize = 1>: Copy + Sized {
+    fn to_bits(self) -> [u32; WORDS];
+    fn from_bits(bits: [u32; WORDS]) -> Self;
+    
+    fn registers(self) -> impl Iterator<Item=usize>;
 
     unsafe fn from_ptr(ptr: *const u32) -> Self {
-        Self::from_repr(unsafe { ptr.cast::<Self::Repr>().read() })
+        Self::from_bits(unsafe { ptr.cast::<[u32; WORDS]>().read() })
     }
 }
+
+trait Field {
+    fn registers(self) -> impl Iterator<Item=usize>;
+}
+
+trait RegType: Pod + Zeroable + Into<usize> { }
+impl RegType for u8 { }
+impl RegType for u16 { }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
-#[repr(C, align(4))]
-pub struct RegImm16 {
-    opcode: u8,
-    r1: u8,
-    imm16: u16
-}
+#[repr(transparent)]
+pub struct Reg<T>(pub T);
 
-impl InstructionRepr for RegImm16 {
-    fn registers(&self) -> impl IntoIterator<Item=u8> {
-        [self.r1]
+impl<T: RegType> Field for Reg<T> {
+    fn registers(self) -> impl Iterator<Item=usize> {
+        [self.0.into()].into_iter()
     }
 }
+
+impl<T: RegType> Reg<T> {
+    pub fn index(self) -> usize { self.0.into() }
+}
+
+trait ImmType: Pod + Zeroable { }
+impl ImmType for u8 { }
+impl ImmType for u16 { }
+impl ImmType for i8 { }
+impl ImmType for i16 { }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
-#[repr(C, align(4))]
-pub struct RegOff16 {
-    opcode: u8,
-    r1: u8,
-    off16: i16
-}
+#[repr(transparent)]
+pub struct Imm<T>(pub T);
 
-impl InstructionRepr for RegOff16 {
-    fn registers(&self) -> impl IntoIterator<Item=u8> {
-        [self.r1]
+impl<T> Field for Imm<T> {
+    fn registers(self) -> impl Iterator<Item=usize> {
+        std::iter::empty()
     }
 }
 
-#[derive(Copy, Clone, Pod, Zeroable)]
-#[repr(C, align(4))]
-pub struct RegRegReg {
-    opcode: u8,
-    r1: u8,
-    r2: u8,
-    r3: u8,
-}
-
-impl InstructionRepr for RegRegReg {
-    fn registers(&self) -> impl IntoIterator<Item=u8> {
-        [self.r1, self.r2, self.r3]
+impl<T: ImmType + Into<i32>> Imm<T> {
+    pub fn as_i32(self) -> i32 {
+        self.0.into()
     }
 }
 
-#[derive(Copy, Clone, Pod, Zeroable)]
-#[repr(C, align(4))]
-pub struct RegRegImm8 {
-    opcode: u8,
-    r1: u8,
-    r2: u8,
-    imm8: i8,
-}
-
-
-impl InstructionRepr for RegRegImm8 {
-    fn registers(&self) -> impl IntoIterator<Item=u8> {
-        [self.r1, self.r2]
+impl<T: ImmType + Into<u32>> Imm<T> {
+    pub fn as_u32(self) -> u32 {
+        self.0.into()
     }
-}
-
-macro_rules! _generate_instruction {
-    {$instr:ident $opcode:ident r1: $r1:ident, imm16: $imm16:ident} => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone)]
-        pub struct $instr {
-            pub $r1: u8, pub $imm16: u16
-        }
-
-
-        impl $crate::Instruction for $instr {
-            type Repr = $crate::instr::RegImm16;
-
-            fn to_repr(self) -> Self::Repr {
-                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, imm16: self.$imm16 }
-            }
-
-            fn from_repr(repr: Self::Repr) -> Self {
-                Self { $r1: repr.r1, $imm16: repr.imm16 }
-            }
-        }
-    };
-    
-    {$instr:ident $opcode:ident r1: $r1:ident, off16: $off16:ident} => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone)]
-        pub struct $instr {
-            pub $r1: u8, pub $off16: i16
-        }
-
-
-        impl $crate::Instruction for $instr {
-            type Repr = $crate::instr::RegOff16;
-
-            fn to_repr(self) -> Self::Repr {
-                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, off16: self.$off16 }
-            }
-
-            fn from_repr(repr: Self::Repr) -> Self {
-                Self { $r1: repr.r1, $off16: repr.off16 }
-            }
-        }
-    };
-
-    {$instr:ident $opcode:ident r1: $r1:ident, r2: $r2:ident, r3: $r3:ident} => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone)]
-        pub struct $instr {
-            pub $r1: u8, pub $r2: u8, pub $r3: u8
-        }
-
-        impl $crate::Instruction for $instr {
-            type Repr = $crate::instr::RegRegReg;
-
-            fn to_repr(self) -> Self::Repr {
-                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, r2: self.$r2, r3: self.$r3 }
-            }
-
-            fn from_repr(repr: Self::Repr) -> Self {
-                Self { $r1: repr.r1, $r2: repr.r2, $r3: repr.r3 }
-            }
-        }
-    };
-    
-    {$instr:ident $opcode:ident r1: $r1:ident, r2: $r2:ident, imm8: $imm8:ident} => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone)]
-        pub struct $instr {
-            pub $r1: u8, pub $r2: u8, pub $imm8: i8
-        }
-
-        impl $crate::Instruction for $instr {
-            type Repr = $crate::instr::RegRegImm8;
-
-            fn to_repr(self) -> Self::Repr {
-                Self::Repr { opcode: (super::$opcode::$instr).bits(), r1: self.$r1, r2: self.$r2, imm8: self.$imm8 }
-            }
-
-            fn from_repr(repr: Self::Repr) -> Self {
-                Self { $r1: repr.r1, $r2: repr.r2, $imm8: repr.imm8 }
-            }
-        }
-    };
 }
 
 
 macro_rules! generate_instructions {
-    { $vis:vis mod $instrs:ident(enum $opcode:ident) { $( $instr:ident { $($field:ident : $ty:ident),* $(,)? } ),* $(,)? } } => {
+    { $vis:vis mod $instrs:ident(enum $opcode:ident) { $( $instr:ident <$words:literal> { $($field:ident : $ty:ty),* $(,)? } ),* $(,)? } } => {
         $vis mod $instrs {
-            $(_generate_instruction! { $instr $opcode $($field: $ty),* })*
+            use super::{Reg, Imm, Field};
+        $(
+            #[allow(non_camel_case_types)]
+            #[derive(Copy, Clone)]
+            pub struct $instr {
+                $(pub $field: $ty),*
+            }
+
+            const _: () = {
+                #[derive(Copy, Clone, bytemuck::NoUninit)]
+                #[repr(C)]
+                struct Repr(u8, $($ty),*);
+
+                assert!(size_of::<Repr>() == size_of::<[u32; $words]>());
+            };
+
+            impl $crate::Instruction<$words> for $instr {
+                fn to_bits(self) -> [u32; $words] {
+                    type Repr = (u8, $($ty),*);
+                    let value = ((super::$opcode::$instr).bits(), $(self.$field),*);
+                    unsafe { std::mem::transmute::<Repr, _>(value) }
+                }
+
+                fn from_bits(bits: [u32; $words]) -> Self {
+                    type Repr = (u8, $($ty),*);
+                    let (_, $($field),*) = unsafe { std::mem::transmute::<_, Repr>(bits) };
+                    Self { $($field),* }
+                }
+                
+                fn registers(self) -> impl Iterator<Item=usize> {
+                    std::iter::empty()$(.chain(self.$field.registers()))* 
+                }
+            }
+        )*
         }
 
         #[allow(non_camel_case_types)]
@@ -182,19 +118,19 @@ macro_rules! generate_instructions {
 
 generate_instructions! {
     pub mod instrs(enum InstructionCode) {
-        lzi16 { r1: dst, imm16: imm },              // Load integer from 16 bit immediate zero-extended to 32 bits
-        iaddrr { r1: dst, r2: left, r3: right },
-        imulrr { r1: dst, r2: left, r3: right },
-        idivrr { r1: dst, r2: left, r3: right },
-        imodrr { r1: dst, r2: left, r3: right },
-        iaddri { r1: dst, r2: left, imm8: right },
-        imulri { r1: dst, r2: left, imm8: right },
-        idivri { r1: dst, r2: left, imm8: right },
-        imodri { r1: dst, r2: left, imm8: right },
-        ieqrr { r1: dst, r2: left, r3: right },
-        ieqri { r1: dst, r2: left, imm8: right },
-        jtr { r1: src, off16: off },
-        jmp { r1: _pad, off16: off },
-        ret { r1: src, imm16: _pad }
+        lzi16<1> { dst: Reg<u8>, imm: Imm<u16> },              // Load integer from 16 bit immediate zero-extended to 32 bits
+        iaddrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
+        imulrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
+        idivrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
+        imodrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
+        iaddri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        imulri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        idivri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        imodri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        ieqrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
+        ieqri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        jtr<1> { src: Reg<u8>, off: Imm<i16> },
+        jmp<1> { _pad: Reg<u8>, off: Imm<i16> },
+        ret<1> { src: Reg<u8>, _pad: Imm<u16> }
     }
 }

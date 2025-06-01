@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Instant;
-use crate::instr::{Instruction, InstructionCode, InstructionRepr};
+use crate::instr::{Imm, Instruction, InstructionCode, Reg};
 use crate::value::{UnwrappedValue, Value};
 
 struct CodeChunk {
@@ -20,25 +20,25 @@ impl CodeChunk {
 }
 
 struct CodeChunkBuilder {
-    highest_register: u32,
+    highest_register: usize,
     instructions: Vec<u32>
 }
 
 impl CodeChunkBuilder {
-    pub fn instr(&mut self, instr: impl Instruction) -> &mut Self {
-        let repr = instr.to_repr();
-        for register in repr.registers() {
-            if register as u32 > self.highest_register {
-                self.highest_register = register as u32;
+    pub fn instr<const WORDS: usize>(&mut self, instr: impl Instruction<WORDS>) -> &mut Self {
+        let repr = instr.to_bits();
+        for register in instr.registers() {
+            if register > self.highest_register {
+                self.highest_register = register;
             }
         }
-        self.instructions.extend_from_slice(bytemuck::cast_slice(&[repr]));
+        self.instructions.extend_from_slice(&repr);
         self
     }
 
     pub fn finish(&mut self) -> CodeChunk {
         CodeChunk {
-            required_registers: self.highest_register + 1,
+            required_registers: (self.highest_register + 1).try_into().unwrap(),
             instructions: std::mem::take(&mut self.instructions).into_boxed_slice()
         }
     }
@@ -170,64 +170,64 @@ macro_rules! define {
 define! {
     unsafe fn execute(ip: InstrPtr, frame: Context) -> DispatchResult {
         lzi16 { dst, imm } => unsafe {
-            frame.write_unchecked(dst, Value::from_i32(imm as u32 as i32));
+            frame.write_unchecked(dst.index(), Value::from_i32(imm.as_i32()));
         }
         iaddrr { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            let right = frame.read_unchecked(right).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left + right));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            let right = frame.read_unchecked(right.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left + right));
         }
         imulrr { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            let right = frame.read_unchecked(right).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left * right));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            let right = frame.read_unchecked(right.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left * right));
         }
         idivrr { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            let right = frame.read_unchecked(right).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left / right));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            let right = frame.read_unchecked(right.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left / right));
         }
         imodrr { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            let right = frame.read_unchecked(right).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left % right));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            let right = frame.read_unchecked(right.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left % right));
         }
         iaddri { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left + (right as i32)));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left + right.as_i32()));
         }
         imulri { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left * (right as i32)));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left * right.as_i32()));
         }
         idivri { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left / (right as i32)));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left / right.as_i32()));
         }
         imodri { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_i32(left % (right as i32)));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left % right.as_i32()));
         }
         ieqrr { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            let right = frame.read_unchecked(right).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_bool(left == right));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            let right = frame.read_unchecked(right.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_bool(left == right));
         }
         ieqri { dst, left, right } => unsafe {
-            let left = frame.read_unchecked(left).as_int_unchecked();
-            frame.write_unchecked(dst, Value::from_bool(left == (right as i32)));
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_bool(left == (right.as_i32())));
         }
         jtr { src, off } => unsafe {
-            let bool = frame.read_unchecked(src).as_bool_unchecked();
+            let bool = frame.read_unchecked(src.index()).as_bool_unchecked();
             if bool {
-                ip.offset(off as isize)
+                ip.offset(off.as_i32() as isize)
             }
         }
         jmp { _pad, off } => unsafe {
-            ip.offset(off as isize)
+            ip.offset(off.as_i32() as isize)
         }
         ret { src, _pad } => unsafe {
-            let value = frame.read_unchecked(src);
+            let value = frame.read_unchecked(src.index());
             if let Some((_ip, _frame)) = frame.into_inner().pop_call_frame() {
                 todo!()
             } else {
@@ -316,25 +316,25 @@ fn main() {
     use instr::instrs::*;
 
     let code = CodeChunk::builder()
-        .instr(lzi16 { dst: 1, imm: 0 })
+        .instr(lzi16 { dst: Reg(1), imm: Imm(0) })
 
-        .instr(ieqri { dst: 2, left: 0, right: 1 })
-        .instr(jtr { src: 2, off: 9 })
+        .instr(ieqri { dst: Reg(2), left: Reg(0), right: Imm(1) })
+        .instr(jtr { src: Reg(2), off: Imm(9) })
 
-        .instr(imodri { dst: 2, left: 0, right: 2 })
-        .instr(ieqri { dst: 2, left: 2, right: 1 })
-        .instr(jtr { src: 2, off: 2 })
+        .instr(imodri { dst: Reg(2), left: Reg(0), right: Imm(2) })
+        .instr(ieqri { dst: Reg(2), left: Reg(2), right: Imm(1) })
+        .instr(jtr { src: Reg(2), off: Imm(2) })
 
-        .instr(idivri { dst: 0, left: 0, right: 2 })
-        .instr(jmp { _pad: 0, off: 2 })
+        .instr(idivri { dst: Reg(0), left: Reg(0), right: Imm(2) })
+        .instr(jmp { _pad: Reg(0), off: Imm(2) })
 
-        .instr(imulri { dst: 0, left: 0, right: 3 })
-        .instr(iaddri { dst: 0, left: 0, right: 1 })
+        .instr(imulri { dst: Reg(0), left: Reg(0), right: Imm(3) })
+        .instr(iaddri { dst: Reg(0), left: Reg(0), right: Imm(1) })
 
-        .instr(iaddri { dst: 1, left: 1, right: 1 })
-        .instr(jmp { _pad: 0, off: -11 })
+        .instr(iaddri { dst: Reg(1), left: Reg(1), right: Imm(1) })
+        .instr(jmp { _pad: Reg(0), off: Imm(-11) })
 
-        .instr(ret { src: 1, _pad: 0 })
+        .instr(ret { src: Reg(1), _pad: Imm(0) })
         .finish();
 
     let function = Function { parameters: 1, code: Arc::new(code) };
@@ -363,6 +363,7 @@ fn main() {
 mod test {
     use std::sync::Arc;
     use crate::{CodeChunk, Function, VirtualMachine};
+    use crate::instr::{Imm, Reg};
     use crate::value::{UnwrappedValue, Value};
 
     #[test]
@@ -370,25 +371,25 @@ mod test {
         use crate::instr::instrs::*;
 
         let function = CodeChunk::builder()
-            .instr(lzi16 { dst: 1, imm: 0 })
+            .instr(lzi16 { dst: Reg(1), imm: Imm(0) })
             
-            .instr(ieqri { dst: 2, left: 0, right: 1 })
-            .instr(jtr { src: 2, off: 9 })
+            .instr(ieqri { dst: Reg(2), left: Reg(0), right: Imm(1) })
+            .instr(jtr { src: Reg(2), off: Imm(9) })
             
-            .instr(imodri { dst: 2, left: 0, right: 2 })
-            .instr(ieqri { dst: 2, left: 2, right: 1 })
-            .instr(jtr { src: 2, off: 2 })
+            .instr(imodri { dst: Reg(2), left: Reg(0), right: Imm(2) })
+            .instr(ieqri { dst: Reg(2), left: Reg(2), right: Imm(1) })
+            .instr(jtr { src: Reg(2), off: Imm(2) })
             
-            .instr(idivri { dst: 0, left: 0, right: 2 })
-            .instr(jmp { _pad: 0, off: 2 })
+            .instr(idivri { dst: Reg(0), left: Reg(0), right: Imm(2) })
+            .instr(jmp { _pad: Reg(0), off: Imm(2) })
             
-            .instr(imulri { dst: 0, left: 0, right: 3 })
-            .instr(iaddri { dst: 0, left: 0, right: 1 })
+            .instr(imulri { dst: Reg(0), left: Reg(0), right: Imm(3) })
+            .instr(iaddri { dst: Reg(0), left: Reg(0), right: Imm(1) })
             
-            .instr(iaddri { dst: 1, left: 1, right: 1 })
-            .instr(jmp { _pad: 0, off: -11 })
+            .instr(iaddri { dst: Reg(1), left: Reg(1), right: Imm(1) })
+            .instr(jmp { _pad: Reg(0), off: Imm(-11) })
             
-            .instr(ret { src: 1, _pad: 0 })
+            .instr(ret { src: Reg(1), _pad: Imm(0) })
             .finish();
         
         let function = Function { code: Arc::new(function), parameters: 1 };
