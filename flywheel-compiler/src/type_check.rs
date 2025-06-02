@@ -4,9 +4,10 @@ use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
 
-use crate::ast::{self};
+use crate::ast::{self, ast_type};
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
+use crate::id::AstId;
 use crate::parser::Parse;
 use crate::query::Processor;
 use crate::source::{Location, SourceID, SourceInput, Sources};
@@ -21,13 +22,13 @@ enum NamespaceRef {
 #[derive(Copy, Clone)]
 pub enum Type {
     Integer,
-    Struct(SourceID, ast::Struct),
+    Struct(SourceID, AstId),
 }
 
 #[derive(Copy, Clone)]
 enum Value {
     Import(SourceID),
-    Struct(SourceID, AstRef<ast::Struct>),
+    Struct(SourceID, AstId),
     TypeAlias(Type),
 }
 
@@ -84,8 +85,8 @@ impl Processor for ComputeDeclaredNames {
             .top_levels()
             .iter()
             .filter_map(|top_level| match top_level {
-                &ast::TopLevel::Import(ast_import) => {
-                    let relative_path = camino::Utf8PathBuf::from(ast.resolve(ast.get_node(ast_import).relative_path));
+                ast::TopLevel::Import(ast_import) => {
+                    let relative_path = camino::Utf8PathBuf::from(ast.resolve(ast_import.relative_path));
 
                     let handle_ref = &handle;
                     Some(async move {
@@ -106,7 +107,7 @@ impl Processor for ComputeDeclaredNames {
         let mut direct_imports = HashSet::new();
         let mut file_namespace = Namespace::new(Some(NamespaceRef::Root));
         for top_level in ast.top_levels() {
-            let (name, value, location) = match *top_level {
+            let (name, value, location) = match top_level {
                 ast::TopLevel::Import(ast_import) => {
                     let (relative_path, maybe_source) = imports_stream.next().await.unwrap();
                     let source = maybe_source?;
@@ -116,18 +117,21 @@ impl Processor for ComputeDeclaredNames {
                     let name = strings.get_or_intern(
                         relative_path.file_name().and_then(|path| path.strip_suffix(".fly")).unwrap_or_else(|| todo!()),
                     );
-                    let location = ast.get_location(ast_import);
+                    let location = ast.get_location(ast_import.id());
                     (name, value, location)
                 }
                 ast::TopLevel::Struct(ast_struct) => {
-                    let name = ast.get_node(ast_struct).name;
-                    let value = Value::Struct(source_id, ast_struct);
-                    let location = ast.get_location(ast_struct);
+                    let name = ast_struct.name.clone_contents();
+                    let value = Value::Struct(source_id, ast_struct.id());
+                    let location = ast.get_location(ast_struct.id());
                     (name, value, location)
                 }
                 ast::TopLevel::Function(_) => continue,
             };
 
+            assert!(location.is_some(), "All top-level nodes should have a location, and {} doesn't.", ast.resolve(name));
+            let location = location.unwrap();
+            
             if let Err(_previous_location) = file_namespace.insert(name, value, Some(location)) {
                 // todo note
                 return Err(CompileError::with_description_and_location(
@@ -144,7 +148,7 @@ impl Processor for ComputeDeclaredNames {
 
 pub struct DefinedTypes {
     dependencies: HashSet<SourceID>,
-    structs: HashMap<AstRef<ast::Struct>, StructDefinition>,
+    structs: HashMap<AstId, StructDefinition>,
 }
 
 pub struct StructDefinition {
@@ -182,21 +186,22 @@ impl<'a> NamespaceResolver<'a> {
 
         None
     }
+    
 
     fn resolve_type(
         &self,
         in_namespace: NamespaceRef,
         ast: &ast::FileAST,
-        ast_type: AstRef<ast::Type>,
+        ast_node_type: &ast::ast_type::Type,
+        ast_node_location: Location,
     ) -> CompileResult<Type> {
-        let type_ = ast.get_node(ast_type);
-        let resolved = match type_ {
-            &ast::Type::Name(name) => {
-                let Some((value, _location)) = self.resolve(in_namespace, name) else {
+        let resolved = match ast_node_type {
+            &ast_type::Type::Name(name) => {
+                let Some((value, _)) = self.resolve(in_namespace, name) else {
                     return Err(CompileError::with_description_and_location(
                         "type-check/unknown-name",
                         format!("Name '{}' was not found in this scope.", ast.resolve(name)),
-                        ast.get_location(ast_type),
+                        ast_node_location,
                     ));
                 };
                 match value {
@@ -205,7 +210,7 @@ impl<'a> NamespaceResolver<'a> {
                         return Err(CompileError::with_description_and_location(
                             "type-check/not-a-type",
                             format!("Name '{}' is not a type.", ast.resolve(name)),
-                            ast.get_location(ast_type),
+                            ast_node_location,
                         ));
                     }
                     Value::Struct(source, ast_struct) => Type::Struct(source, ast_struct),
@@ -230,17 +235,17 @@ async fn parallel_trace_imports(
             debug_assert!(visited.contains_key(&next));
             in_progress.push(async move { (next, handle.query::<ComputeDeclaredNames>(next).await) });
         }
-        if let Some((next_id, next_declared)) = in_progress.next().await {
-            let next_declared = next_declared?;
-            *visited.get_mut(&next_id).unwrap() = Some(next_declared);
+        let Some((next_id, next_declared)) = in_progress.next().await else {
+            break
+        };
 
-            for &import in &next_declared.direct_imports {
-                if visited.entry(import).or_default().is_none() {
-                    to_visit.push(import);
-                }
+        let next_declared = next_declared?;
+        *visited.get_mut(&next_id).unwrap() = Some(next_declared);
+
+        for &import in &next_declared.direct_imports {
+            if visited.entry(import).or_default().is_none() {
+                to_visit.push(import);
             }
-        } else {
-            break;
         }
     }
 
@@ -275,16 +280,14 @@ impl Processor for ComputeDefinedTypes {
 
         let mut structs = HashMap::new();
         for top_level in ast.top_levels() {
-            match *top_level {
+            match top_level {
                 ast::TopLevel::Struct(ast_struct) => {
-                    let struct_ = ast.get_node(ast_struct);
                     let mut fields = HashMap::new();
-                    for &ast_field in ast.get_list(struct_.fields) {
-                        let field = ast.get_node(ast_field);
-                        let field_type = resolver.resolve_type(NamespaceRef::Module(source_id), ast, field.ty)?;
-                        fields.insert(field.name, field_type); // todo check no duplicates
+                    for ast_field in &ast_struct.fields {
+                        let field_type = resolver.resolve_type(NamespaceRef::Module(source_id), ast, &ast_field.ty, ast.get_location(ast_field.id()).unwrap())?;
+                        fields.insert(ast_field.name.clone_contents(), field_type); // todo check no duplicates
                     }
-                    structs.insert(ast_struct, StructDefinition { fields }); // todo check no duplicates
+                    structs.insert(ast_struct.id(), StructDefinition { fields }); // todo check no duplicates
                 }
                 ast::TopLevel::Import(_) => (),
                 ast::TopLevel::Function(_) => (),

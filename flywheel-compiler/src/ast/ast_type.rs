@@ -3,7 +3,7 @@ use crate::id::beacon::Beacon;
 use crate::utils::InternedString;
 use crate::utils::pretty_tree::{AsDebugTree, PrettyTree};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Name(InternedString),
 }

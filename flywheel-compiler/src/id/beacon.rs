@@ -49,3 +49,11 @@ impl<T> DerefMut for Beacon<T> {
         &mut self.internal
     }
 }
+
+impl<T: Clone> Beacon<T> {
+    
+    /// Clone the contents of the beacon, without its ID
+    pub fn clone_contents(&self) -> T {
+        self.internal.as_ref().clone()
+    }
+}

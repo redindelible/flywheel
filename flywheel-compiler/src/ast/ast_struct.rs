@@ -4,14 +4,14 @@ use crate::id::beacon::Beacon;
 use crate::utils::InternedString;
 use crate::utils::pretty_tree::{AsDebugTree, PrettyTree};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Struct {
     pub name: Beacon<InternedString>,
     pub fields: Vec<Beacon<Field>>,
 }
 
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Field {
     pub name: Beacon<InternedString>,
     pub ty: Beacon<Type>,
