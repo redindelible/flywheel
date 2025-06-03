@@ -1,82 +1,16 @@
 mod value;
 mod instr;
+mod builder;
 // mod stack;
 
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Instant;
+
+use crate::builder::CodeChunk;
 use crate::instr::{Imm, Instruction, InstructionCode, Reg};
 use crate::value::{UnwrappedValue, Value};
-
-struct CodeChunk {
-    required_registers: u32,
-    instructions: Box<[u32]>
-}
-
-impl CodeChunk {
-    fn builder() -> CodeChunkBuilder {
-        CodeChunkBuilder { highest_register: 0, instructions: vec![] }
-    }
-}
-
-struct CodeChunkBuilder {
-    highest_register: usize,
-    instructions: Vec<u32>
-}
-
-impl CodeChunkBuilder {
-    pub fn instr<const WORDS: usize>(&mut self, instr: impl Instruction<WORDS>) -> &mut Self {
-        let repr = instr.to_bits();
-        for register in instr.registers() {
-            if register > self.highest_register {
-                self.highest_register = register;
-            }
-        }
-        self.instructions.extend_from_slice(&repr);
-        self
-    }
-
-    pub fn finish(&mut self) -> CodeChunk {
-        CodeChunk {
-            required_registers: (self.highest_register + 1).try_into().unwrap(),
-            instructions: std::mem::take(&mut self.instructions).into_boxed_slice()
-        }
-    }
-}
-
-// struct CallFrame<'f> {
-//     registers_start: usize,
-//     ip: InstrPtr<'f>
-// }
-
-// struct Context<'vm, 'f> {
-//     registers_view: *mut Value,
-//     vm_ref: &'vm mut VirtualMachine<'f>
-// }
-// 
-// const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
-// 
-// impl<'vm, 'f> Context<'vm, 'f> {
-//     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
-//         unsafe {
-//             let register = register.into();
-//             self.registers_view.add(register).write(value);
-//         }
-//     }
-// 
-//     unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
-//         unsafe {
-//             self.registers_view.add(register.into()).read()
-//         }
-//     }
-// 
-//     fn into_inner(self) -> &'vm mut VirtualMachine<'f> {
-//         self.vm_ref
-//     }
-// }
-
-type DispatchResult = Result<Value, ()>;
 
 #[cfg(not(feature = "threaded-loop"))]
 macro_rules! define {
@@ -98,52 +32,7 @@ macro_rules! define {
     };
 }
 
-#[cfg(feature = "threaded-loop")]
-macro_rules! define {
-    { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
-        const _: () = {
-            #[allow(dead_code, unreachable_code, unused_variables)]
-            if false {
-                match (unreachable!() as Instruction) {
-                    $(Instruction::$op { $($field),* } => ()),*
-                }
-            }
-        };
-
-        type DispatchFn = for<'a> unsafe fn(&'a DispatchTable, $ip_ty, $frame_ty) -> $ret;
-        struct DispatchTable([Option<DispatchFn>; 256]);
-        const DISPATCH_TABLE: DispatchTable = const {
-            let mut table: DispatchTable = DispatchTable([None; 256]);
-            $(
-            table.0[InstructionCode::$op as usize] = Some(|#[allow(unused_variables)] table: &DispatchTable, #[allow(unused_variables, unused_mut)] mut $ip: $ip_ty, #[allow(unused_variables, unused_mut)] mut $frame: $frame_ty| -> $ret {
-                let instr = unsafe { $ip.get() };
-                let Instruction::$op { $($field),* } = instr else { unsafe { std::hint::unreachable_unchecked() } };
-                $body;
-                #[allow(unreachable_code)]
-                unsafe { dispatch(table, $ip, $frame) }
-            });
-            )*
-            table
-        };
-
-        unsafe fn dispatch(table: &DispatchTable, mut instr_ptr: $ip_ty, frame: $frame_ty) -> $ret {
-            unsafe {
-                let instr = instr_ptr.advance();
-                let index = instr.code().bits();
-                table.0.get_unchecked(index as usize).unwrap_unchecked()(table, instr_ptr, frame)
-            }
-        }
-
-        unsafe fn $name($ip: $ip_ty, $frame: $frame_ty) -> $ret {
-            unsafe {
-                let instr = $ip.get();
-
-                DISPATCH_TABLE.0.get_unchecked(instr.code().bits() as usize).unwrap_unchecked()(&DISPATCH_TABLE, $ip, $frame)
-            }
-        }
-    };
-}
-
+type DispatchResult = Result<Value, ()>;
 
 define! {
     unsafe fn execute(frame: CallFrame) -> DispatchResult {
@@ -248,29 +137,32 @@ impl<'f> CallFrame<'f> {
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
         unsafe {
             let register = register.into();
+            debug_assert!(register < self.registers.len());
             *self.registers.get_unchecked_mut(register) = value;
         }
     }
 
     unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
         unsafe {
-            *self.registers.get_unchecked(register.into())
+            let register = register.into();
+            debug_assert!(register < self.registers.len());
+            *self.registers.get_unchecked(register)
         }
     }
-    
+
     unsafe fn pop_call_frame(mut self) -> Option<Self> {
         self.prev.take().map(|boxed| *boxed)
     }
 }
 
 struct VirtualMachine {
-    
+
 }
 
 impl VirtualMachine {
     fn new() -> Self {
         VirtualMachine {
-            
+
         }
     }
 
@@ -288,8 +180,8 @@ impl VirtualMachine {
     }
 
     unsafe fn initial_call_frame<'vm, 'f>(&'vm mut self, function: &'f Function) -> CallFrame<'f> {
-        let ip = InstrPtr::new(&*function.code.instructions);
-        let required = function.code.required_registers;
+        let ip = InstrPtr::new(function.code.instructions());
+        let required = function.code.required_registers();
 
         let registers = vec![Value::new_none(); required as usize].into_boxed_slice();
 

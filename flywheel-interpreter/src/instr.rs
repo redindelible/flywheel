@@ -15,7 +15,7 @@ trait Field {
     fn registers(self) -> impl Iterator<Item=usize>;
 }
 
-trait RegType: Pod + Zeroable + Into<usize> { }
+pub trait RegType: Pod + Zeroable + Into<usize> { }
 impl RegType for u8 { }
 impl RegType for u16 { }
 
@@ -46,7 +46,7 @@ impl<T: RegType> Field for RegRange<T> {
     }
 }
 
-trait ImmType: Pod + Zeroable { }
+pub trait ImmType: Pod + Zeroable { }
 impl ImmType for u8 { }
 impl ImmType for u16 { }
 impl ImmType for i8 { }
