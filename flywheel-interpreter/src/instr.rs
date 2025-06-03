@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 pub trait Instruction<const WORDS: usize = 1>: Copy + Sized {
     fn to_bits(self) -> [u32; WORDS];
     fn from_bits(bits: [u32; WORDS]) -> Self;
-    
+
     fn registers(self) -> impl Iterator<Item=usize>;
 
     unsafe fn from_ptr(ptr: *const u32) -> Self {
@@ -31,6 +31,19 @@ impl<T: RegType> Field for Reg<T> {
 
 impl<T: RegType> Reg<T> {
     pub fn index(self) -> usize { self.0.into() }
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C, packed)]
+pub struct RegRange<T> {
+    start: T,
+    count: T
+}
+
+impl<T: RegType> Field for RegRange<T> {
+    fn registers(self) -> impl Iterator<Item=usize> {
+        self.start.into()..(self.start.into() + self.count.into())
+    }
 }
 
 trait ImmType: Pod + Zeroable { }
@@ -65,7 +78,7 @@ impl<T: ImmType + Into<u32>> Imm<T> {
 macro_rules! generate_instructions {
     { $vis:vis mod $instrs:ident(enum $opcode:ident) { $( $instr:ident <$words:literal> { $($field:ident : $ty:ty),* $(,)? } ),* $(,)? } } => {
         $vis mod $instrs {
-            use super::{Reg, Imm, Field};
+            use super::{Reg, RegRange, Imm, Field};
         $(
             #[allow(non_camel_case_types)]
             #[derive(Copy, Clone)]
@@ -93,9 +106,9 @@ macro_rules! generate_instructions {
                     let (_, $($field),*) = unsafe { std::mem::transmute::<_, Repr>(bits) };
                     Self { $($field),* }
                 }
-                
+
                 fn registers(self) -> impl Iterator<Item=usize> {
-                    std::iter::empty()$(.chain(self.$field.registers()))* 
+                    std::iter::empty()$(.chain(self.$field.registers()))*
                 }
             }
         )*

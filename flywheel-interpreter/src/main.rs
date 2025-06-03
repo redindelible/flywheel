@@ -1,5 +1,6 @@
 mod value;
 mod instr;
+// mod stack;
 
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -44,77 +45,54 @@ impl CodeChunkBuilder {
     }
 }
 
-struct CallFrame<'f> {
-    registers_start: usize,
-    ip: InstrPtr<'f>
-}
+// struct CallFrame<'f> {
+//     registers_start: usize,
+//     ip: InstrPtr<'f>
+// }
 
-#[derive(Copy, Clone)]
-struct InstrPtr<'f>(NonNull<u32>, PhantomData<&'f u32>);
-
-impl<'f> InstrPtr<'f> {
-    fn new(instrs: &'f [u32]) -> Self {
-        Self(NonNull::<[u32]>::from(instrs).cast::<u32>(), PhantomData)
-    }
-    
-    unsafe fn get_code(&self) -> InstructionCode {
-        unsafe { self.0.cast::<InstructionCode>().read() }
-    }
-
-    unsafe fn advance(&mut self) {
-        unsafe {
-            self.0 = self.0.byte_add(4);
-        }
-    }
-
-    unsafe fn offset(&mut self, amount: isize) {
-        unsafe { self.0 = self.0.byte_offset(amount * 4) };
-    }
-}
-
-struct Context<'vm, 'f> {
-    registers_view: *mut Value,
-    vm_ref: &'vm mut VirtualMachine<'f>
-}
-
-const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
-
-impl<'vm, 'f> Context<'vm, 'f> {
-    unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
-        unsafe {
-            let register = register.into();
-            self.registers_view.add(register).write(value);
-        }
-    }
-
-    unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
-        unsafe {
-            self.registers_view.add(register.into()).read()
-        }
-    }
-
-    fn into_inner(self) -> &'vm mut VirtualMachine<'f> {
-        self.vm_ref
-    }
-}
+// struct Context<'vm, 'f> {
+//     registers_view: *mut Value,
+//     vm_ref: &'vm mut VirtualMachine<'f>
+// }
+// 
+// const _: () = const { assert!(size_of::<Context>() <= 2 * size_of::<usize>()) };
+// 
+// impl<'vm, 'f> Context<'vm, 'f> {
+//     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
+//         unsafe {
+//             let register = register.into();
+//             self.registers_view.add(register).write(value);
+//         }
+//     }
+// 
+//     unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
+//         unsafe {
+//             self.registers_view.add(register.into()).read()
+//         }
+//     }
+// 
+//     fn into_inner(self) -> &'vm mut VirtualMachine<'f> {
+//         self.vm_ref
+//     }
+// }
 
 type DispatchResult = Result<Value, ()>;
 
 #[cfg(not(feature = "threaded-loop"))]
 macro_rules! define {
-    { $vis:vis unsafe fn $name:ident($ip:ident: $ip_ty:ty, $frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
-        $vis unsafe fn $name(mut $ip: $ip_ty, mut $frame: $frame_ty) -> $ret {
+    { $vis:vis unsafe fn $name:ident($frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
+        $vis unsafe fn $name(mut $frame: $frame_ty) -> $ret {
             loop {
-                let opcode = unsafe { $ip.get_code() };
+                let opcode = unsafe { $frame.ip.get_code() };
                 match opcode {
                     $(
                         InstructionCode::$op => {
-                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($ip.0.as_ptr()) };
+                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($frame.ip.0.as_ptr()) };
                             $body;
                         }
                     ),*
                 }
-                unsafe { $ip.advance() };
+                unsafe { $frame.ip.advance() };
             }
         }
     };
@@ -168,7 +146,7 @@ macro_rules! define {
 
 
 define! {
-    unsafe fn execute(ip: InstrPtr, frame: Context) -> DispatchResult {
+    unsafe fn execute(frame: CallFrame) -> DispatchResult {
         lzi16 { dst, imm } => unsafe {
             frame.write_unchecked(dst.index(), Value::from_i32(imm.as_i32()));
         }
@@ -220,15 +198,15 @@ define! {
         jtr { src, off } => unsafe {
             let bool = frame.read_unchecked(src.index()).as_bool_unchecked();
             if bool {
-                ip.offset(off.as_i32() as isize)
+                frame.ip.offset(off.as_i32() as isize)
             }
         }
         jmp { _pad, off } => unsafe {
-            ip.offset(off.as_i32() as isize)
+            frame.ip.offset(off.as_i32() as isize)
         }
         ret { src, _pad } => unsafe {
             let value = frame.read_unchecked(src.index());
-            if let Some((_ip, _frame)) = frame.into_inner().pop_call_frame() {
+            if let Some(_frame) = frame.pop_call_frame() {
                 todo!()
             } else {
                 return Ok(value)
@@ -237,65 +215,88 @@ define! {
     }
 }
 
-struct VirtualMachine<'f> {
-    registers: Vec<Value>,
-    call_stack: Vec<CallFrame<'f>>,
+#[derive(Copy, Clone)]
+struct InstrPtr<'f>(NonNull<u32>, PhantomData<&'f u32>);
+
+impl<'f> InstrPtr<'f> {
+    fn new(instrs: &'f [u32]) -> Self {
+        Self(NonNull::<[u32]>::from(instrs).cast::<u32>(), PhantomData)
+    }
+
+    unsafe fn get_code(&self) -> InstructionCode {
+        unsafe { self.0.cast::<InstructionCode>().read() }
+    }
+
+    unsafe fn advance(&mut self) {
+        unsafe {
+            self.0 = self.0.byte_add(4);
+        }
+    }
+
+    unsafe fn offset(&mut self, amount: isize) {
+        unsafe { self.0 = self.0.byte_offset(amount * 4) };
+    }
 }
 
-impl<'f> VirtualMachine<'f> {
+struct CallFrame<'f> {
+    ip: InstrPtr<'f>,
+    registers: Box<[Value]>,
+    prev: Option<Box<CallFrame<'f>>>
+}
+
+impl<'f> CallFrame<'f> {
+    unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
+        unsafe {
+            let register = register.into();
+            *self.registers.get_unchecked_mut(register) = value;
+        }
+    }
+
+    unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
+        unsafe {
+            *self.registers.get_unchecked(register.into())
+        }
+    }
+    
+    unsafe fn pop_call_frame(mut self) -> Option<Self> {
+        self.prev.take().map(|boxed| *boxed)
+    }
+}
+
+struct VirtualMachine {
+    
+}
+
+impl VirtualMachine {
     fn new() -> Self {
         VirtualMachine {
-            registers: vec![],
-            call_stack: vec![]
+            
         }
     }
 
     #[inline(never)]
-    fn execute(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
+    fn execute<'f>(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.parameters as usize);
         let result = unsafe {
-            let (ip, mut frame) = self.initial_call_frame(function);
+            let mut frame = self.initial_call_frame(function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
-            execute(ip, frame)
+            execute(frame)
         };
-        assert!(self.registers.is_empty());
-        assert!(self.call_stack.is_empty());
         result
     }
 
-    unsafe fn initial_call_frame<'vm>(&'vm mut self, function: &'f Function) -> (InstrPtr<'f>, Context<'vm, 'f>) {
+    unsafe fn initial_call_frame<'vm, 'f>(&'vm mut self, function: &'f Function) -> CallFrame<'f> {
         let ip = InstrPtr::new(&*function.code.instructions);
         let required = function.code.required_registers;
 
-        let start = self.registers.len();
-        self.registers.extend(std::iter::repeat_n(Value::new_none(), required as usize));
+        let registers = vec![Value::new_none(); required as usize].into_boxed_slice();
 
-        self.call_stack.push(CallFrame {
-            registers_start: start,
-            ip
-        });
-        let registers_view = self.registers[start..].as_mut_ptr();
-        (ip, Context { registers_view, vm_ref: self })
-    }
-
-    unsafe fn push_call_frame<'vm>(&'vm mut self, ip: InstrPtr<'f>, function: &'f Function) -> (InstrPtr<'f>, Context<'vm, 'f>) {
-        let current_call_frame = unsafe { self.call_stack.last_mut().unwrap_unchecked() };
-        current_call_frame.ip = ip;
-
-        unsafe { self.initial_call_frame(function) }
-    }
-
-    unsafe fn pop_call_frame<'vm>(&'vm mut self) -> Option<(InstrPtr<'f>, Context<'vm, 'f>)> {
-        let current = unsafe { self.call_stack.pop().unwrap_unchecked() };
-        self.registers.drain(current.registers_start..);
-        if let Some(frame) = self.call_stack.last() {
-            let start = frame.registers_start;
-            let registers_view = self.registers[start..].as_mut_ptr();
-            Some((frame.ip, Context { registers_view, vm_ref: self }))
-        } else {
-            None
+        CallFrame {
+            ip,
+            registers,
+            prev: None
         }
     }
 }
