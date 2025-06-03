@@ -1,6 +1,7 @@
 mod value;
 mod instr;
 mod builder;
+mod thin;
 // mod stack;
 
 use std::marker::PhantomData;
@@ -10,23 +11,23 @@ use std::time::Instant;
 
 use crate::builder::CodeChunk;
 use crate::instr::{Imm, Instruction, InstructionCode, Reg};
+use crate::thin::ThinList;
 use crate::value::{UnwrappedValue, Value};
 
-#[cfg(not(feature = "threaded-loop"))]
 macro_rules! define {
     { $vis:vis unsafe fn $name:ident($frame:ident: $frame_ty:ty) -> $ret:ty { $( $op:ident { $($field:ident),* } => $body:expr )* } } => {
         $vis unsafe fn $name(mut $frame: $frame_ty) -> $ret {
             loop {
-                let opcode = unsafe { $frame.ip.get_code() };
+                let opcode = unsafe { $frame.ip().get_code() };
                 match opcode {
                     $(
                         InstructionCode::$op => {
-                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($frame.ip.0.as_ptr()) };
+                            let instr::instrs::$op { $($field),* } = unsafe { instr::instrs::$op::from_ptr($frame.ip().0.as_ptr()) };
                             $body;
                         }
                     ),*
                 }
-                unsafe { $frame.ip.advance() };
+                unsafe { $frame.offset_ip(1) };
             }
         }
     };
@@ -87,11 +88,11 @@ define! {
         jtr { src, off } => unsafe {
             let bool = frame.read_unchecked(src.index()).as_bool_unchecked();
             if bool {
-                frame.ip.offset(off.as_i32() as isize)
+                frame.offset_ip(off.as_i32() as isize)
             }
         }
         jmp { _pad, off } => unsafe {
-            frame.ip.offset(off.as_i32() as isize)
+            frame.offset_ip(off.as_i32() as isize)
         }
         ret { src, _pad } => unsafe {
             let value = frame.read_unchecked(src.index());
@@ -116,42 +117,57 @@ impl<'f> InstrPtr<'f> {
         unsafe { self.0.cast::<InstructionCode>().read() }
     }
 
-    unsafe fn advance(&mut self) {
-        unsafe {
-            self.0 = self.0.byte_add(4);
-        }
+    unsafe fn offset(&mut self, amount: isize) -> Self {
+        unsafe { Self(self.0.byte_offset(amount * 4), PhantomData) }
     }
+}
 
-    unsafe fn offset(&mut self, amount: isize) {
-        unsafe { self.0 = self.0.byte_offset(amount * 4) };
-    }
+struct CallFrameHeader<'f> {
+    ip: InstrPtr<'f>,
+    prev: Option<CallFrame<'f>>
 }
 
 struct CallFrame<'f> {
-    ip: InstrPtr<'f>,
-    registers: Box<[Value]>,
-    prev: Option<Box<CallFrame<'f>>>
+    inner: ThinList<Value, CallFrameHeader<'f>>
 }
 
 impl<'f> CallFrame<'f> {
+    fn new_initial(function: &'f Function) -> Self {
+        let ip = InstrPtr::new(function.code.instructions());
+        let required = function.code.required_registers();
+
+        Self {
+            inner: ThinList::from_header_fill_copy(CallFrameHeader { ip, prev: None }, Value::new_none(), required as usize)
+        }
+    }
+    
+    fn ip(&self) -> InstrPtr<'f> {
+        self.inner.header().ip
+    }
+    
+    unsafe fn offset_ip(&mut self, offset: isize) {
+        let ip_ref = &mut self.inner.header_mut().ip;
+        *ip_ref = unsafe { (*ip_ref).offset(offset) };
+    }
+
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
         unsafe {
             let register = register.into();
-            debug_assert!(register < self.registers.len());
-            *self.registers.get_unchecked_mut(register) = value;
+            debug_assert!(register < self.inner.len());
+            *self.inner.slice_mut().get_unchecked_mut(register) = value;
         }
     }
 
-    unsafe fn read_unchecked(&mut self, register: impl Into<usize>) -> Value {
+    unsafe fn read_unchecked(&self, register: impl Into<usize>) -> Value {
         unsafe {
             let register = register.into();
-            debug_assert!(register < self.registers.len());
-            *self.registers.get_unchecked(register)
+            debug_assert!(register < self.inner.len());
+            *self.inner.slice().get_unchecked(register)
         }
     }
 
-    unsafe fn pop_call_frame(mut self) -> Option<Self> {
-        self.prev.take().map(|boxed| *boxed)
+    unsafe fn pop_call_frame(self) -> Option<Self> {
+        self.inner.into_header().prev.take()
     }
 }
 
@@ -170,26 +186,13 @@ impl VirtualMachine {
     fn execute<'f>(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.parameters as usize);
         let result = unsafe {
-            let mut frame = self.initial_call_frame(function);
+            let mut frame = CallFrame::new_initial(function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
             execute(frame)
         };
         result
-    }
-
-    unsafe fn initial_call_frame<'vm, 'f>(&'vm mut self, function: &'f Function) -> CallFrame<'f> {
-        let ip = InstrPtr::new(function.code.instructions());
-        let required = function.code.required_registers();
-
-        let registers = vec![Value::new_none(); required as usize].into_boxed_slice();
-
-        CallFrame {
-            ip,
-            registers,
-            prev: None
-        }
     }
 }
 
