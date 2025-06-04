@@ -91,8 +91,12 @@ impl<T, H> ThinList<T, H> {
         unsafe { &*self.slice_raw() }
     }
 
-    pub fn slice_mut(&self) -> &mut [T] {
+    pub fn slice_mut(&mut self) -> &mut [T] {
         unsafe { &mut *self.slice_raw() }
+    }
+    
+    pub fn parts_mut(&mut self) -> (&mut H, &mut [T]) {
+        unsafe { (&mut self.0.as_mut().header, &mut *self.slice_raw()) }
     }
 }
 

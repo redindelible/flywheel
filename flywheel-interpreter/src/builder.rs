@@ -1,26 +1,20 @@
 use crate::instr::Instruction;
 
 pub struct CodeChunk {
-    required_registers: u32,
-    instructions: Box<[u32]>
+    pub required_registers: u32,
+    pub parameters: u32,
+    pub instructions: Box<[u32]>
 }
 
 impl CodeChunk {
-    pub fn builder() -> CodeChunkBuilder {
-        CodeChunkBuilder { highest_register: 0, instructions: vec![] }
-    }
-    
-    pub fn required_registers(&self) -> u32 {
-        self.required_registers
-    }
-    
-    pub fn instructions(&self) -> &[u32] {
-        &self.instructions
+    pub fn builder(parameters: u32) -> CodeChunkBuilder {
+        CodeChunkBuilder { parameters, registers_needed: parameters, instructions: vec![] }
     }
 }
 
 pub struct CodeChunkBuilder {
-    highest_register: usize,
+    parameters: u32,
+    registers_needed: u32,
     instructions: Vec<u32>
 }
 
@@ -28,8 +22,8 @@ impl CodeChunkBuilder {
     pub fn instr<const WORDS: usize>(&mut self, instr: impl Instruction<WORDS>) -> &mut Self {
         let repr = instr.to_bits();
         for register in instr.registers() {
-            if register > self.highest_register {
-                self.highest_register = register;
+            if register >= self.registers_needed {
+                self.registers_needed = register + 1;
             }
         }
         self.instructions.extend_from_slice(&repr);
@@ -38,7 +32,8 @@ impl CodeChunkBuilder {
 
     pub fn finish(&mut self) -> CodeChunk {
         CodeChunk {
-            required_registers: (self.highest_register + 1).try_into().unwrap(),
+            parameters: self.parameters,
+            required_registers: self.registers_needed.try_into().unwrap(),
             instructions: std::mem::take(&mut self.instructions).into_boxed_slice()
         }
     }

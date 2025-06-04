@@ -4,7 +4,7 @@ pub trait Instruction<const WORDS: usize = 1>: Copy + Sized {
     fn to_bits(self) -> [u32; WORDS];
     fn from_bits(bits: [u32; WORDS]) -> Self;
 
-    fn registers(self) -> impl Iterator<Item=usize>;
+    fn registers(self) -> impl Iterator<Item=u32>;
 
     unsafe fn from_ptr(ptr: *const u32) -> Self {
         Self::from_bits(unsafe { ptr.cast::<[u32; WORDS]>().read() })
@@ -12,10 +12,10 @@ pub trait Instruction<const WORDS: usize = 1>: Copy + Sized {
 }
 
 trait Field {
-    fn registers(self) -> impl Iterator<Item=usize>;
+    fn registers(self) -> impl Iterator<Item=u32>;
 }
 
-pub trait RegType: Pod + Zeroable + Into<usize> { }
+pub trait RegType: Pod + Zeroable + Into<u32> { }
 impl RegType for u8 { }
 impl RegType for u16 { }
 
@@ -24,24 +24,25 @@ impl RegType for u16 { }
 pub struct Reg<T>(pub T);
 
 impl<T: RegType> Field for Reg<T> {
-    fn registers(self) -> impl Iterator<Item=usize> {
+    fn registers(self) -> impl Iterator<Item=u32> {
         [self.0.into()].into_iter()
     }
 }
 
 impl<T: RegType> Reg<T> {
-    pub fn index(self) -> usize { self.0.into() }
+    pub fn index(self) -> usize { self.0.into() as usize }
+    pub fn index_u32(self) -> u32 { self.0.into() }
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C, packed)]
 pub struct RegRange<T> {
-    start: T,
-    count: T
+    pub start: T,
+    pub count: T
 }
 
 impl<T: RegType> Field for RegRange<T> {
-    fn registers(self) -> impl Iterator<Item=usize> {
+    fn registers(self) -> impl Iterator<Item=u32> {
         self.start.into()..(self.start.into() + self.count.into())
     }
 }
@@ -57,7 +58,7 @@ impl ImmType for i16 { }
 pub struct Imm<T>(pub T);
 
 impl<T> Field for Imm<T> {
-    fn registers(self) -> impl Iterator<Item=usize> {
+    fn registers(self) -> impl Iterator<Item=u32> {
         std::iter::empty()
     }
 }
@@ -107,7 +108,7 @@ macro_rules! generate_instructions {
                     Self { $($field),* }
                 }
 
-                fn registers(self) -> impl Iterator<Item=usize> {
+                fn registers(self) -> impl Iterator<Item=u32> {
                     std::iter::empty()$(.chain(self.$field.registers()))*
                 }
             }
@@ -137,13 +138,18 @@ generate_instructions! {
         idivrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
         imodrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
         iaddri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        isubri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
         imulri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
         idivri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
         imodri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
         ieqrr<1> { dst: Reg<u8>, left: Reg<u8>, right: Reg<u8> },
         ieqri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
-        jtr<1> { src: Reg<u8>, off: Imm<i16> },
+        iltri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        igtri<1> { dst: Reg<u8>, left: Reg<u8>, right: Imm<u8> },
+        jif<1> { src: Reg<u8>, off: Imm<i16> },
+        jifn<1> { src: Reg<u8>, off: Imm<i16> },
         jmp<1> { _pad: Reg<u8>, off: Imm<i16> },
+        callr<1> { dst: Reg<u8>, args: RegRange<u8> },
         ret<1> { src: Reg<u8>, _pad: Imm<u16> }
     }
 }

@@ -4,13 +4,15 @@ mod builder;
 mod thin;
 // mod stack;
 
+use std::cell::OnceCell;
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::builder::CodeChunk;
-use crate::instr::{Imm, Instruction, InstructionCode, Reg};
+use crate::instr::{Imm, Instruction, InstructionCode, Reg, RegRange};
 use crate::thin::ThinList;
 use crate::value::{UnwrappedValue, Value};
 
@@ -64,6 +66,10 @@ define! {
             let left = frame.read_unchecked(left.index()).as_int_unchecked();
             frame.write_unchecked(dst.index(), Value::from_i32(left + right.as_i32()));
         }
+        isubri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_i32(left - right.as_i32()));
+        }
         imulri { dst, left, right } => unsafe {
             let left = frame.read_unchecked(left.index()).as_int_unchecked();
             frame.write_unchecked(dst.index(), Value::from_i32(left * right.as_i32()));
@@ -85,19 +91,40 @@ define! {
             let left = frame.read_unchecked(left.index()).as_int_unchecked();
             frame.write_unchecked(dst.index(), Value::from_bool(left == (right.as_i32())));
         }
-        jtr { src, off } => unsafe {
+        iltri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_bool(left < (right.as_i32())));
+        }
+        igtri { dst, left, right } => unsafe {
+            let left = frame.read_unchecked(left.index()).as_int_unchecked();
+            frame.write_unchecked(dst.index(), Value::from_bool(left > (right.as_i32())));
+        }
+        jif { src, off } => unsafe {
             let bool = frame.read_unchecked(src.index()).as_bool_unchecked();
             if bool {
+                frame.offset_ip(off.as_i32() as isize)
+            }
+        }
+        jifn { src, off } => unsafe {
+            let bool = frame.read_unchecked(src.index()).as_bool_unchecked();
+            if !bool {
                 frame.offset_ip(off.as_i32() as isize)
             }
         }
         jmp { _pad, off } => unsafe {
             frame.offset_ip(off.as_i32() as isize)
         }
+        callr { dst, args } => unsafe {
+            let this_fn = frame.inner.header().function;
+            let range = args.start as usize..(args.start as usize+args.count as usize);
+            frame = frame.push_call_frame(this_fn, range, dst.index_u32());
+            continue;
+        }
         ret { src, _pad } => unsafe {
             let value = frame.read_unchecked(src.index());
-            if let Some(_frame) = frame.pop_call_frame() {
-                todo!()
+            if let Some((new_frame, dst)) = frame.pop_call_frame() {
+                frame = new_frame;
+                frame.write_unchecked(dst as usize, value);
             } else {
                 return Ok(value)
             }
@@ -124,7 +151,8 @@ impl<'f> InstrPtr<'f> {
 
 struct CallFrameHeader<'f> {
     ip: InstrPtr<'f>,
-    prev: Option<CallFrame<'f>>
+    function: &'f Function,
+    prev: Option<(CallFrame<'f>, u32)>
 }
 
 struct CallFrame<'f> {
@@ -133,12 +161,37 @@ struct CallFrame<'f> {
 
 impl<'f> CallFrame<'f> {
     fn new_initial(function: &'f Function) -> Self {
-        let ip = InstrPtr::new(function.code.instructions());
-        let required = function.code.required_registers();
+        let required = function.code.required_registers;
+        let header = CallFrameHeader {
+            ip: InstrPtr::new(&function.code.instructions),
+            function,
+            prev: None
+        };
 
-        Self {
-            inner: ThinList::from_header_fill_copy(CallFrameHeader { ip, prev: None }, Value::new_none(), required as usize)
+        CallFrame {
+            inner: ThinList::from_header_fill_copy(header, Value::new_none(), required as usize)
         }
+    }
+
+    unsafe fn push_call_frame(self, function: &'f Function, args_from: Range<usize>, dst: u32) -> CallFrame<'f> {
+        let required = function.code.required_registers;
+        let header = CallFrameHeader {
+            ip: InstrPtr::new(&function.code.instructions),
+            function,
+            prev: Some((self, dst))
+        };
+
+        let mut new = ThinList::from_header_fill_copy(header, Value::new_none(), required as usize);
+        let (header, slice) = new.parts_mut();
+        let prev_frame = &header.prev.as_ref().unwrap().0;
+        
+        slice[..args_from.len()].copy_from_slice(&prev_frame.inner.slice()[args_from]);
+
+        CallFrame { inner: new }
+    }
+
+    unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
+        self.inner.into_header().prev.take()
     }
     
     fn ip(&self) -> InstrPtr<'f> {
@@ -165,10 +218,6 @@ impl<'f> CallFrame<'f> {
             *self.inner.slice().get_unchecked(register)
         }
     }
-
-    unsafe fn pop_call_frame(self) -> Option<Self> {
-        self.inner.into_header().prev.take()
-    }
 }
 
 struct VirtualMachine {
@@ -184,7 +233,7 @@ impl VirtualMachine {
 
     #[inline(never)]
     fn execute<'f>(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
-        assert!(args.len() <= function.parameters as usize);
+        assert!(args.len() <= function.code.parameters as usize);
         let result = unsafe {
             let mut frame = CallFrame::new_initial(function);
             for (i, arg) in args.iter().copied().enumerate() {
@@ -199,7 +248,7 @@ impl VirtualMachine {
 
 struct Function {
     code: Arc<CodeChunk>,
-    parameters: u32
+    called: OnceCell<Box<[Arc<Function>]>>
 }
 
 
@@ -211,70 +260,58 @@ struct Interpreter {
 fn main() {
     use instr::instrs::*;
 
-    let code = CodeChunk::builder()
-        .instr(lzi16 { dst: Reg(1), imm: Imm(0) })
+    let code = CodeChunk::builder(1)
+        .instr(iltri { dst: Reg(1), left: Reg(0), right: Imm(2) })
+        .instr(jif { src: Reg(1), off: Imm(5) })
 
-        .instr(ieqri { dst: Reg(2), left: Reg(0), right: Imm(1) })
-        .instr(jtr { src: Reg(2), off: Imm(9) })
+        .instr(isubri { dst: Reg(1), left: Reg(0), right: Imm(1) })
+        .instr(callr { dst: Reg(1), args: RegRange { start: 1, count: 1 }})
+        .instr(isubri { dst: Reg(0), left: Reg(0), right: Imm(2) })
+        .instr(callr { dst: Reg(0), args: RegRange { start: 0, count: 1 }})
+        .instr(iaddrr { dst: Reg(0), left: Reg(1), right: Reg(0) })
 
-        .instr(imodri { dst: Reg(2), left: Reg(0), right: Imm(2) })
-        .instr(ieqri { dst: Reg(2), left: Reg(2), right: Imm(1) })
-        .instr(jtr { src: Reg(2), off: Imm(2) })
+        .instr(ret { src: Reg(0), _pad: Imm(0) })
 
-        .instr(idivri { dst: Reg(0), left: Reg(0), right: Imm(2) })
-        .instr(jmp { _pad: Reg(0), off: Imm(2) })
-
-        .instr(imulri { dst: Reg(0), left: Reg(0), right: Imm(3) })
-        .instr(iaddri { dst: Reg(0), left: Reg(0), right: Imm(1) })
-
-        .instr(iaddri { dst: Reg(1), left: Reg(1), right: Imm(1) })
-        .instr(jmp { _pad: Reg(0), off: Imm(-11) })
-
-        .instr(ret { src: Reg(1), _pad: Imm(0) })
         .finish();
 
-    let function = Function { parameters: 1, code: Arc::new(code) };
+    let function = Arc::new(Function { code: Arc::new(code), called: OnceCell::new() });
+    function.called.set(vec![function.clone()].into_boxed_slice()).ok().unwrap();
     
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
     for _ in 0..10000 {
-        let result = vm.execute(&function, &[Value::from_i32(6171)]);
+        let result = vm.execute(&function, &[Value::from_i32(15)]);
         match result.unwrap().unwrap() {
-            UnwrappedValue::Integer(num) => assert_eq!(num, 261),
+            UnwrappedValue::Integer(num) => assert_eq!(num, 610),
             other => panic!("{:?}", other)
         };
     }
-    
-    let feature = if cfg!(feature = "threaded-loop") {
-        "Threaded Loop"
-    } else {
-        "Match"
-    };
-    println!("(Using {feature}) Took {:?}", start.elapsed());
+    println!("Took {:?}", start.elapsed());
 }
 
 
 #[cfg(test)]
 mod test {
+    use std::cell::OnceCell;
     use std::sync::Arc;
     use crate::{CodeChunk, Function, VirtualMachine};
-    use crate::instr::{Imm, Reg};
+    use crate::instr::{Imm, Reg, RegRange};
     use crate::value::{UnwrappedValue, Value};
 
     #[test]
     fn test_collatz() {
         use crate::instr::instrs::*;
 
-        let function = CodeChunk::builder()
+        let function = CodeChunk::builder(1)
             .instr(lzi16 { dst: Reg(1), imm: Imm(0) })
             
             .instr(ieqri { dst: Reg(2), left: Reg(0), right: Imm(1) })
-            .instr(jtr { src: Reg(2), off: Imm(9) })
+            .instr(jif { src: Reg(2), off: Imm(9) })
             
             .instr(imodri { dst: Reg(2), left: Reg(0), right: Imm(2) })
             .instr(ieqri { dst: Reg(2), left: Reg(2), right: Imm(1) })
-            .instr(jtr { src: Reg(2), off: Imm(2) })
+            .instr(jif { src: Reg(2), off: Imm(2) })
             
             .instr(idivri { dst: Reg(0), left: Reg(0), right: Imm(2) })
             .instr(jmp { _pad: Reg(0), off: Imm(2) })
@@ -288,7 +325,7 @@ mod test {
             .instr(ret { src: Reg(1), _pad: Imm(0) })
             .finish();
         
-        let function = Function { code: Arc::new(function), parameters: 1 };
+        let function = Function { code: Arc::new(function), called: OnceCell::from(vec![].into_boxed_slice()) };
 
         let mut vm = VirtualMachine::new();
 
@@ -297,5 +334,37 @@ mod test {
             UnwrappedValue::Integer(num) => assert_eq!(num, 261),
             other => panic!("{:?}", other)
         };
+    }
+
+    #[test]
+    fn test_fibo_rec_sequence() {
+        use crate::instr::instrs::*;
+
+        let code = CodeChunk::builder(1)
+            .instr(iltri { dst: Reg(1), left: Reg(0), right: Imm(2) })
+            .instr(jif { src: Reg(1), off: Imm(5) })
+
+            .instr(isubri { dst: Reg(1), left: Reg(0), right: Imm(1) })
+            .instr(callr { dst: Reg(1), args: RegRange { start: 1, count: 1 }})
+            .instr(isubri { dst: Reg(0), left: Reg(0), right: Imm(2) })
+            .instr(callr { dst: Reg(0), args: RegRange { start: 0, count: 1 }})
+            .instr(iaddrr { dst: Reg(0), left: Reg(1), right: Reg(0) })
+
+            .instr(ret { src: Reg(0), _pad: Imm(0) })
+
+            .finish();
+
+        let function = Function { code: Arc::new(code), called: OnceCell::from(vec![].into_boxed_slice()) };
+
+        let mut vm = VirtualMachine::new();
+
+        let pairs = [(0, 0), (1, 1), (2, 1), (3, 2), (4, 3), (5, 5), (6, 8), (7, 13), (8, 21), (9, 34)];
+        for (index, expected) in pairs {
+            let result = vm.execute(&function, &[Value::from_i32(index)]);
+            match result.unwrap().unwrap() {
+                UnwrappedValue::Integer(num) => assert_eq!(num,expected),
+                other => panic!("{:?}", other)
+            };
+        }
     }
 }
