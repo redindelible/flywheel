@@ -128,16 +128,18 @@ impl Value {
     }
     
     pub unsafe fn as_int_unchecked(self) -> i32 {
-        match self.unwrap() {
-            UnwrappedValue::Integer(num) => num,
-            _ => unsafe { unreachable_unchecked() }
-        }
+        // match self.unwrap() {
+        //     UnwrappedValue::Integer(num) => num,
+        //     _ => unsafe { unreachable_unchecked() }
+        // }
+        (self.0.addr() >> 3) as i32
     }
 
     pub unsafe fn as_bool_unchecked(self) -> bool {
-        match self.unwrap() {
-            UnwrappedValue::Bool(value) => value,
-            _ => unsafe { unreachable_unchecked() }
-        }
+        // match self.unwrap() {
+        //     UnwrappedValue::Bool(value) => value,
+        //     _ => unsafe { unreachable_unchecked() }
+        // }
+        self.0.addr() & 1 == 1
     }
 }

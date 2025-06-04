@@ -292,10 +292,10 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..10000 {
-        let result = vm.execute(&function, &[Value::from_i32(15)]);
+    for _ in 0..5 {
+        let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
-            UnwrappedValue::Integer(num) => assert_eq!(num, 610),
+            UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
             other => panic!("{:?}", other)
         };
     }
@@ -402,7 +402,7 @@ mod test {
 
         let mut vm = VirtualMachine::new();
 
-        let result = vm.execute(&function, &[Value::from_i32(15)]);
+        let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 610),
             other => panic!("{:?}", other)
