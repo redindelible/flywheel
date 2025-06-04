@@ -1,6 +1,6 @@
 use std::hint::unreachable_unchecked;
 use std::ptr::NonNull;
-
+use bytemuck::Zeroable;
 // use crate::gc::GcRef;
 
 #[cfg(not(target_pointer_width = "64"))]
@@ -51,7 +51,7 @@ compile_error!("Currently only 64-bit pointers are supported");
 /// This opens up the lower 3 bits for use as a tag of sorts. If those bits are 000, we know we can
 /// use the `Value` as a [`GCRef`] as-is. Otherwise, the specific value of the tag tells us how
 /// to interpret the 48 remaining payload bits.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Zeroable)]
 pub struct Value(*mut ());
 
 #[derive(Copy, Clone, Debug)]

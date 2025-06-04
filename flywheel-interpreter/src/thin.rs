@@ -1,6 +1,8 @@
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout, LayoutError};
+use std::alloc::{handle_alloc_error, Layout, LayoutError};
 use std::mem::{forget, offset_of};
 use std::ptr::NonNull;
+use allocator_api2::alloc::{Allocator, Global};
+use bytemuck::Zeroable;
 
 struct Inner<T, H> {
     header: H,
@@ -8,7 +10,7 @@ struct Inner<T, H> {
     items: [T; 0]
 }
 
-const fn layout_for_inner<T, H>(count: usize) -> Result<(Layout, usize), LayoutError> {
+const fn layout_for_inner<T, H>(count: usize) -> Result<Layout, LayoutError> {
     let slice_layout = match Layout::array::<T>(count) {
         Ok(layout) => layout,
         Err(e) => return Err(e)
@@ -18,7 +20,7 @@ const fn layout_for_inner<T, H>(count: usize) -> Result<(Layout, usize), LayoutE
         Err(e) => return Err(e)
     };
     debug_assert!(offset == offset_of!(Inner<T, H>, items));
-    Ok((layout.pad_to_align(), offset))
+    Ok(layout.pad_to_align())
 }
 
 fn slice_ptr<T, H>(ptr: *mut Inner<T, H>) -> *mut T {
@@ -27,25 +29,17 @@ fn slice_ptr<T, H>(ptr: *mut Inner<T, H>) -> *mut T {
 
 pub struct ThinList<T, H=()>(NonNull<Inner<T, H>>);
 
-impl<T: Copy, H> ThinList<T, H> {
-    pub fn from_header_fill_copy(header: H, fill: T, count: usize) -> Self {
-        let (layout, _) = layout_for_inner::<T, H>(count).unwrap();
+impl<T: Zeroable, H> ThinList<T, H> {
+    pub fn from_header_zeroed_in<A: Allocator>(header: H, count: usize, allocator: A) -> Self {
+        let layout = layout_for_inner::<T, H>(count).unwrap();
         let ptr = unsafe {
-            let ptr = alloc(layout).cast::<Inner<T, H>>();
-            if ptr.is_null() {
-                handle_alloc_error(layout)
-            }
+            let ptr = allocator.allocate_zeroed(layout).unwrap_or_else(|_| handle_alloc_error(layout)).cast::<Inner<T, H>>().as_ptr();
             (&raw mut (*ptr).header).write(header);
             (&raw mut (*ptr).count).write(count);
 
-            let slice_ptr = slice_ptr(ptr);
-            
-            for i in 0..count {
-                slice_ptr.wrapping_add(i).write(fill);
-            }
             NonNull::new_unchecked(ptr)
         };
-        Self(ptr)
+        ThinList(ptr)
     }
 }
 
@@ -58,10 +52,9 @@ impl<T, H> ThinList<T, H> {
         unsafe { &mut self.0.as_mut().header }
     }
     
-    pub fn into_header(self) -> H {
+    pub fn deallocate<A: Allocator>(self, allocator: A) -> H {
         unsafe {
             let ptr = self.0.as_ptr();
-            forget(self);
             
             let header = (&raw mut (*ptr).header).read();
             let count = (*ptr).count;
@@ -71,7 +64,8 @@ impl<T, H> ThinList<T, H> {
                 slice_ptr.wrapping_add(i).drop_in_place();
             }
 
-            dealloc(ptr.cast(), layout_for_inner::<T, H>(count).unwrap().0);
+            allocator.deallocate(self.0.cast(), layout_for_inner::<T, H>(count).unwrap());
+            forget(self);
             
             header
         }
@@ -95,6 +89,20 @@ impl<T, H> ThinList<T, H> {
         unsafe { &mut *self.slice_raw() }
     }
     
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        let slice_ptr = slice_ptr(self.0.as_ptr());
+        unsafe {
+            &*slice_ptr.add(index)
+        }
+    }
+
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        let slice_ptr = slice_ptr(self.0.as_ptr());
+        unsafe {
+            &mut *slice_ptr.add(index)
+        }
+    }
+
     pub fn parts_mut(&mut self) -> (&mut H, &mut [T]) {
         unsafe { (&mut self.0.as_mut().header, &mut *self.slice_raw()) }
     }
@@ -104,15 +112,16 @@ impl<T, H> Drop for ThinList<T, H> {
     fn drop(&mut self) {
         unsafe {
             let ptr = self.0.as_ptr();
+            
             (&raw mut (*ptr).header).drop_in_place();
             let count = (*ptr).count;
-            
-            let slice_ptr = slice_ptr(ptr);
-            for i in 0..count {
-                slice_ptr.wrapping_add(i).drop_in_place();
+
+            if std::mem::needs_drop::<T>() {
+                let slice_ptr = slice_ptr(ptr);
+                for i in 0..count {
+                    slice_ptr.wrapping_add(i).drop_in_place();
+                }
             }
-            
-            dealloc(ptr.cast(), layout_for_inner::<T, H>(count).unwrap().0)
         }
     }
 }

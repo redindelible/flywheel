@@ -149,49 +149,60 @@ impl<'f> InstrPtr<'f> {
     }
 }
 
+type Bump = bump_scope::Bump<allocator_api2::alloc::Global, 8, false>;
+// type Bump = bump_scope::Bump;
+
 struct CallFrameHeader<'f> {
     ip: InstrPtr<'f>,
     function: &'f Function,
-    prev: Option<(CallFrame<'f>, u32)>
+    prev: Option<(ThinList<Value, CallFrameHeader<'f>>, u32)>
 }
 
-struct CallFrame<'f> {
+struct CallFrame<'vm, 'f> {
+    bump: &'vm Bump,
     inner: ThinList<Value, CallFrameHeader<'f>>
 }
 
-impl<'f> CallFrame<'f> {
-    fn new_initial(function: &'f Function) -> Self {
+impl<'vm, 'f> CallFrame<'vm, 'f> {
+    fn new_initial(bump: &'vm Bump, function: &'f Function) -> Self {
         let required = function.code.required_registers;
         let header = CallFrameHeader {
             ip: InstrPtr::new(&function.code.instructions),
             function,
             prev: None
         };
+        
+        let inner = ThinList::from_header_zeroed_in(header, required as usize, bump);
 
         CallFrame {
-            inner: ThinList::from_header_fill_copy(header, Value::new_none(), required as usize)
+            bump,
+            inner
         }
     }
 
-    unsafe fn push_call_frame(self, function: &'f Function, args_from: Range<usize>, dst: u32) -> CallFrame<'f> {
+    unsafe fn push_call_frame(self, function: &'f Function, args_from: Range<usize>, dst: u32) -> CallFrame<'vm, 'f> {
+        let CallFrame { bump, inner } = self;
         let required = function.code.required_registers;
         let header = CallFrameHeader {
             ip: InstrPtr::new(&function.code.instructions),
             function,
-            prev: Some((self, dst))
+            prev: Some((inner, dst))
         };
 
-        let mut new = ThinList::from_header_fill_copy(header, Value::new_none(), required as usize);
+        let mut new = ThinList::from_header_zeroed_in(header, required as usize, bump);
         let (header, slice) = new.parts_mut();
         let prev_frame = &header.prev.as_ref().unwrap().0;
-        
-        slice[..args_from.len()].copy_from_slice(&prev_frame.inner.slice()[args_from]);
 
-        CallFrame { inner: new }
+        slice[..args_from.len()].copy_from_slice(&prev_frame.slice()[args_from]);
+
+        CallFrame { bump, inner: new }
     }
 
     unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
-        self.inner.into_header().prev.take()
+        let CallFrame { bump, inner } = self;
+        
+        let (new_inner, dst) = inner.deallocate(bump).prev?;
+        Some((CallFrame { bump, inner: new_inner }, dst))
     }
     
     fn ip(&self) -> InstrPtr<'f> {
@@ -207,7 +218,7 @@ impl<'f> CallFrame<'f> {
         unsafe {
             let register = register.into();
             debug_assert!(register < self.inner.len());
-            *self.inner.slice_mut().get_unchecked_mut(register) = value;
+            *self.inner.get_unchecked_mut(register) = value;
         }
     }
 
@@ -215,19 +226,19 @@ impl<'f> CallFrame<'f> {
         unsafe {
             let register = register.into();
             debug_assert!(register < self.inner.len());
-            *self.inner.slice().get_unchecked(register)
+            *self.inner.get_unchecked(register)
         }
     }
 }
 
 struct VirtualMachine {
-
+    stack: Bump,
 }
 
 impl VirtualMachine {
     fn new() -> Self {
         VirtualMachine {
-
+            stack: Bump::with_size(8 * 1024)
         }
     }
 
@@ -235,12 +246,13 @@ impl VirtualMachine {
     fn execute<'f>(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.code.parameters as usize);
         let result = unsafe {
-            let mut frame = CallFrame::new_initial(function);
+            let mut frame = CallFrame::new_initial(&mut self.stack, function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
             execute(frame)
         };
+        assert_eq!(self.stack.stats().allocated(), 0);
         result
     }
 }
@@ -362,9 +374,38 @@ mod test {
         for (index, expected) in pairs {
             let result = vm.execute(&function, &[Value::from_i32(index)]);
             match result.unwrap().unwrap() {
-                UnwrappedValue::Integer(num) => assert_eq!(num,expected),
+                UnwrappedValue::Integer(num) => assert_eq!(num, expected),
                 other => panic!("{:?}", other)
             };
         }
+    }
+
+    #[test]
+    fn test_fibo_rec_high() {
+        use crate::instr::instrs::*;
+
+        let code = CodeChunk::builder(1)
+            .instr(iltri { dst: Reg(1), left: Reg(0), right: Imm(2) })
+            .instr(jif { src: Reg(1), off: Imm(5) })
+
+            .instr(isubri { dst: Reg(1), left: Reg(0), right: Imm(1) })
+            .instr(callr { dst: Reg(1), args: RegRange { start: 1, count: 1 }})
+            .instr(isubri { dst: Reg(0), left: Reg(0), right: Imm(2) })
+            .instr(callr { dst: Reg(0), args: RegRange { start: 0, count: 1 }})
+            .instr(iaddrr { dst: Reg(0), left: Reg(1), right: Reg(0) })
+
+            .instr(ret { src: Reg(0), _pad: Imm(0) })
+
+            .finish();
+
+        let function = Function { code: Arc::new(code), called: OnceCell::from(vec![].into_boxed_slice()) };
+
+        let mut vm = VirtualMachine::new();
+
+        let result = vm.execute(&function, &[Value::from_i32(15)]);
+        match result.unwrap().unwrap() {
+            UnwrappedValue::Integer(num) => assert_eq!(num, 610),
+            other => panic!("{:?}", other)
+        };
     }
 }
