@@ -2,6 +2,7 @@ mod value;
 mod instr;
 mod builder;
 mod thin;
+mod utils;
 // mod stack;
 
 use std::cell::OnceCell;
@@ -116,7 +117,7 @@ define! {
         }
         callr { dst, args } => unsafe {
             let this_fn = frame.inner.header().function;
-            frame = frame.push_call_frame(this_fn, args.start as usize..args.start as usize+args.count as usize, dst.index_u32());
+            frame = frame.push_call_frame(this_fn, args.start as usize, args.count as usize, dst.index_u32());
             continue;
         }
         ret { src, _pad } => unsafe {
@@ -183,7 +184,7 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         }
     }
 
-    unsafe fn push_call_frame(self, function: &'f Function, range: Range<usize>, dst: u32) -> CallFrame<'vm, 'f> {
+    unsafe fn push_call_frame(self, function: &'f Function, start: usize, count: usize, dst: u32) -> CallFrame<'vm, 'f> {
         let CallFrame { ip: old_ip, stack: bump, mut inner } = self;
         inner.header_mut().ip = old_ip;
         
@@ -199,7 +200,8 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let (header, slice) = new.parts_mut();
         let prev_frame = &header.prev.as_ref().unwrap().0;
 
-        slice[..range.len()].copy_from_slice(&prev_frame.slice()[range]);
+        unsafe { utils::copy_silly(slice.as_mut_ptr(), prev_frame.slice()[start..].as_ptr(), count) };
+        // slice[..count].copy_from_slice(&prev_frame.slice()[start..start+count]);
 
         CallFrame { ip, stack: bump, inner: new }
     }
@@ -300,7 +302,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..5 {
+    for _ in 0..300 {
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 317811),

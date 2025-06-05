@@ -1,4 +1,5 @@
 use std::alloc::{handle_alloc_error, Layout, LayoutError};
+use std::hint::assert_unchecked;
 use std::mem::{forget, offset_of};
 use std::ptr::NonNull;
 
@@ -21,6 +22,9 @@ const fn layout_for_inner<T, H>(count: usize) -> Result<Layout, LayoutError> {
         Err(e) => return Err(e)
     };
     debug_assert!(offset == offset_of!(Inner<T, H>, items));
+    unsafe {
+        assert_unchecked(layout.align() == align_of::<usize>());
+    }
     Ok(layout.pad_to_align())
 }
 
