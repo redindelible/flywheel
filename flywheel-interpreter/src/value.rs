@@ -1,7 +1,5 @@
-use std::hint::unreachable_unchecked;
 use std::ptr::NonNull;
 use bytemuck::Zeroable;
-// use crate::gc::GcRef;
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("Currently only 64-bit pointers are supported");

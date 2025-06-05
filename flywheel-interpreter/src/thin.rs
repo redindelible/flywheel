@@ -1,7 +1,8 @@
 use std::alloc::{handle_alloc_error, Layout, LayoutError};
 use std::mem::{forget, offset_of};
 use std::ptr::NonNull;
-use allocator_api2::alloc::{Allocator, Global};
+
+use allocator_api2::alloc::Allocator;
 use bytemuck::Zeroable;
 
 struct Inner<T, H> {

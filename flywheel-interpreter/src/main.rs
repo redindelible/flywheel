@@ -116,8 +116,7 @@ define! {
         }
         callr { dst, args } => unsafe {
             let this_fn = frame.inner.header().function;
-            let range = args.start as usize..(args.start as usize+args.count as usize);
-            frame = frame.push_call_frame(this_fn, range, dst.index_u32());
+            frame = frame.push_call_frame(this_fn, args.start as usize..args.start as usize+args.count as usize, dst.index_u32());
             continue;
         }
         ret { src, _pad } => unsafe {
@@ -159,32 +158,39 @@ struct CallFrameHeader<'f> {
 }
 
 struct CallFrame<'vm, 'f> {
-    bump: &'vm Bump,
+    ip: InstrPtr<'f>,
+    stack: &'vm Bump,
     inner: ThinList<Value, CallFrameHeader<'f>>
 }
 
 impl<'vm, 'f> CallFrame<'vm, 'f> {
-    fn new_initial(bump: &'vm Bump, function: &'f Function) -> Self {
+    fn new_initial(stack: &'vm Bump, function: &'f Function) -> Self {
+        let ip = InstrPtr::new(&function.code.instructions);
         let required = function.code.required_registers;
+        
         let header = CallFrameHeader {
-            ip: InstrPtr::new(&function.code.instructions),
+            ip,
             function,
             prev: None
         };
-        
-        let inner = ThinList::from_header_zeroed_in(header, required as usize, bump);
+
+        let inner = ThinList::from_header_zeroed_in(header, required as usize, stack);
 
         CallFrame {
-            bump,
+            ip,
+            stack,
             inner
         }
     }
 
-    unsafe fn push_call_frame(self, function: &'f Function, args_from: Range<usize>, dst: u32) -> CallFrame<'vm, 'f> {
-        let CallFrame { bump, inner } = self;
+    unsafe fn push_call_frame(self, function: &'f Function, range: Range<usize>, dst: u32) -> CallFrame<'vm, 'f> {
+        let CallFrame { ip: old_ip, stack: bump, mut inner } = self;
+        inner.header_mut().ip = old_ip;
+        
+        let ip = InstrPtr::new(&function.code.instructions);
         let required = function.code.required_registers;
         let header = CallFrameHeader {
-            ip: InstrPtr::new(&function.code.instructions),
+            ip,
             function,
             prev: Some((inner, dst))
         };
@@ -193,25 +199,27 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let (header, slice) = new.parts_mut();
         let prev_frame = &header.prev.as_ref().unwrap().0;
 
-        slice[..args_from.len()].copy_from_slice(&prev_frame.slice()[args_from]);
+        slice[..range.len()].copy_from_slice(&prev_frame.slice()[range]);
 
-        CallFrame { bump, inner: new }
+        CallFrame { ip, stack: bump, inner: new }
     }
 
     unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
-        let CallFrame { bump, inner } = self;
-        
+        let CallFrame { ip: _, stack: bump, inner } = self;
+
         let (new_inner, dst) = inner.deallocate(bump).prev?;
-        Some((CallFrame { bump, inner: new_inner }, dst))
+        Some((CallFrame { ip: new_inner.header().ip, stack: bump, inner: new_inner }, dst))
     }
     
     fn ip(&self) -> InstrPtr<'f> {
-        self.inner.header().ip
+        self.ip
+        // self.inner.header().ip
     }
     
     unsafe fn offset_ip(&mut self, offset: isize) {
-        let ip_ref = &mut self.inner.header_mut().ip;
-        *ip_ref = unsafe { (*ip_ref).offset(offset) };
+        unsafe { self.ip = self.ip.offset(offset); }
+        // let ip_ref = &mut self.inner.header_mut().ip;
+        // *ip_ref = unsafe { (*ip_ref).offset(offset) };
     }
 
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
@@ -246,7 +254,7 @@ impl VirtualMachine {
     fn execute<'f>(&mut self, function: &'f Function, args: &[Value]) -> Result<Value, ()> {
         assert!(args.len() <= function.code.parameters as usize);
         let result = unsafe {
-            let mut frame = CallFrame::new_initial(&mut self.stack, function);
+            let mut frame = CallFrame::new_initial(&self.stack, function);
             for (i, arg) in args.iter().copied().enumerate() {
                 frame.write_unchecked(i, arg)
             }
@@ -265,7 +273,7 @@ struct Function {
 
 
 struct Interpreter {
-
+    
 }
 
 
