@@ -1,10 +1,13 @@
 use std::alloc::{handle_alloc_error, Layout, LayoutError};
 use std::hint::assert_unchecked;
+use std::marker::PhantomData;
 use std::mem::{forget, offset_of, MaybeUninit};
+use std::ops::Deref;
 use std::ptr::NonNull;
 
 use allocator_api2::alloc::Allocator;
 
+#[repr(C)]
 struct Inner<T, H> {
     header: H,
     count: usize,
@@ -31,6 +34,45 @@ fn slice_ptr<T, H>(ptr: *mut Inner<T, H>) -> *mut T {
     ptr.wrapping_byte_add(offset_of!(Inner<T, H>, items)).cast::<T>()
 }
 
+pub struct OffsetThinList<T, H>(NonNull<T>, PhantomData<ThinList<T, H>>);
+
+impl<T, H> OffsetThinList<T, H> {
+    pub fn new(thin_list: ThinList<T, H>) -> Self {
+        let slice_ptr = unsafe { thin_list.0.byte_add(offset_of!(Inner<T, H>, items)).cast::<T>() };
+        forget(thin_list);
+        OffsetThinList(slice_ptr, PhantomData)
+    }
+    
+    unsafe fn inner_ptr(&self) -> *mut Inner<T, H> {
+        unsafe { self.0.byte_sub(offset_of!(Inner<T, H>, items)).cast::<Inner<T, H>>().as_ptr() }
+    }
+    
+    pub fn into_thin_list(self) -> ThinList<T, H> {
+        let ret = ThinList(unsafe { self.0.byte_sub(offset_of!(Inner<T, H>, items)).cast::<Inner<T, H>>() });
+        forget(self);
+        ret
+    }
+    
+    pub fn len(&self) -> usize {
+        unsafe {
+            (*self.inner_ptr()).count
+        }
+    }
+    
+    pub fn header(&self) -> &H {
+        unsafe { &(*self.inner_ptr()).header }
+    }
+    
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        unsafe { self.0.add(index).as_ref() }
+    }
+
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        unsafe { self.0.add(index).as_mut() }
+    }
+}
+
+#[repr(transparent)]
 pub struct ThinList<T, H=()>(NonNull<Inner<T, H>>);
 
 impl<T, H> ThinList<MaybeUninit<T>, H> {

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::builder::CodeChunk;
 use crate::instr::{Imm, Instruction, InstructionCode, Reg, RegRange};
-use crate::thin::ThinList;
+use crate::thin::{OffsetThinList, ThinList};
 use crate::value::{UnwrappedValue, Value};
 
 macro_rules! define {
@@ -157,7 +157,7 @@ struct CallFrameHeader<'f> {
 struct CallFrame<'vm, 'f> {
     ip: InstrPtr<'f>,
     stack: &'vm Bump,
-    inner: ThinList<Value, CallFrameHeader<'f>>
+    inner: OffsetThinList<Value, CallFrameHeader<'f>>
 }
 
 impl<'vm, 'f> CallFrame<'vm, 'f> {
@@ -179,7 +179,7 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         CallFrame {
             ip,
             stack,
-            inner: frame
+            inner: OffsetThinList::new(frame)
         }
     }
 
@@ -190,7 +190,7 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let required = function.code.required_registers;
         let header = CallFrameHeader {
             function,
-            prev: Some((inner, old_ip, dst))
+            prev: Some((inner.into_thin_list(), old_ip, dst))
         };
 
         let mut frame = ThinList::from_header_uninit_in(header, required as usize, bump);
@@ -201,7 +201,7 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count); }
         unsafe { utils::set_zero_silly(others.as_mut_ptr().cast::<Value>(), others.len()); }
 
-        let frame = unsafe { frame.assume_init() };
+        let frame = OffsetThinList::new(unsafe { frame.assume_init() });
 
         CallFrame { ip, stack: bump, inner: frame }
     }
@@ -209,8 +209,8 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
     unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
         let CallFrame { ip: _, stack: bump, inner } = self;
 
-        let (new_inner, ip, dst) = inner.deallocate(bump).prev?;
-        Some((CallFrame { ip, stack: bump, inner: new_inner }, dst))
+        let (new_inner, ip, dst) = inner.into_thin_list().deallocate(bump).prev?;
+        Some((CallFrame { ip, stack: bump, inner: OffsetThinList::new(new_inner) }, dst))
     }
     
     fn ip(&self) -> InstrPtr<'f> {
@@ -299,7 +299,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..5 {
+    for _ in 0..300 {
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
