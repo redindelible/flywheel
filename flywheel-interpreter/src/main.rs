@@ -175,12 +175,16 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
             prev: None
         };
 
-        let inner = ThinList::from_header_zeroed_in(header, required as usize, stack);
+        let mut frame = ThinList::from_header_uninit_in(header, required as usize, stack);
+        for slot in frame.slice_mut() {
+            slot.write(Value::new_none());
+        }
+        let frame = unsafe { frame.assume_init() };
 
         CallFrame {
             ip,
             stack,
-            inner
+            inner: frame
         }
     }
 
@@ -196,14 +200,17 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
             prev: Some((inner, dst))
         };
 
-        let mut new = ThinList::from_header_zeroed_in(header, required as usize, bump);
-        let (header, slice) = new.parts_mut();
+        let mut frame = ThinList::from_header_uninit_in(header, required as usize, bump);
+        let (header, slice) = frame.parts_mut();
         let prev_frame = &header.prev.as_ref().unwrap().0;
+        
+        let (parameters, others) = slice.split_at_mut(count);
+        unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count) }
+        others.iter_mut().for_each(|slot| { slot.write(Value::new_none()); });
+        
+        let frame = unsafe { frame.assume_init() };
 
-        unsafe { utils::copy_silly(slice.as_mut_ptr(), prev_frame.slice()[start..].as_ptr(), count) };
-        // slice[..count].copy_from_slice(&prev_frame.slice()[start..start+count]);
-
-        CallFrame { ip, stack: bump, inner: new }
+        CallFrame { ip, stack: bump, inner: frame }
     }
 
     unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
@@ -302,7 +309,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..300 {
+    for _ in 0..5 {
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
@@ -391,6 +398,7 @@ mod test {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn test_fibo_rec_high() {
         use crate::instr::instrs::*;
 
@@ -414,7 +422,7 @@ mod test {
 
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
-            UnwrappedValue::Integer(num) => assert_eq!(num, 610),
+            UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
             other => panic!("{:?}", other)
         };
     }

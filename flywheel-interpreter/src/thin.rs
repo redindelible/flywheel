@@ -1,10 +1,9 @@
 use std::alloc::{handle_alloc_error, Layout, LayoutError};
 use std::hint::assert_unchecked;
-use std::mem::{forget, offset_of};
+use std::mem::{forget, offset_of, MaybeUninit};
 use std::ptr::NonNull;
 
 use allocator_api2::alloc::Allocator;
-use bytemuck::Zeroable;
 
 struct Inner<T, H> {
     header: H,
@@ -34,17 +33,28 @@ fn slice_ptr<T, H>(ptr: *mut Inner<T, H>) -> *mut T {
 
 pub struct ThinList<T, H=()>(NonNull<Inner<T, H>>);
 
-impl<T: Zeroable, H> ThinList<T, H> {
-    pub fn from_header_zeroed_in<A: Allocator>(header: H, count: usize, allocator: A) -> Self {
-        let layout = layout_for_inner::<T, H>(count).unwrap();
-        let ptr = unsafe {
-            let ptr = allocator.allocate_zeroed(layout).unwrap_or_else(|_| handle_alloc_error(layout)).cast::<Inner<T, H>>().as_ptr();
-            (&raw mut (*ptr).header).write(header);
-            (&raw mut (*ptr).count).write(count);
+impl<T, H> ThinList<MaybeUninit<T>, H> {
+    pub fn from_header_uninit_in<A: Allocator>(header: H, count: usize, allocator: A) -> Self {
+        #[inline(always)]
+        unsafe fn inner_writer<T, F>(ptr: *mut T, f: F) where F: FnOnce() -> T {
+            unsafe { ptr.write(f())}
+        }
 
-            NonNull::new_unchecked(ptr)
+        let layout = layout_for_inner::<MaybeUninit<T>, H>(count).unwrap();
+        let ptr = unsafe {
+            let allocated_ptr = allocator.allocate(layout).unwrap_or_else(|_| handle_alloc_error(layout));
+            let ptr = allocated_ptr.cast::<Inner<MaybeUninit<T>, H>>().as_ptr();
+            // (&raw mut (*ptr).header).write(header);
+            (&raw mut (*ptr).count).write(count);
+            inner_writer(&raw mut (*ptr).header, || header);
+
+            allocated_ptr.cast()
         };
         ThinList(ptr)
+    }
+
+    pub unsafe fn assume_init(self) -> ThinList<T, H> {
+        unsafe { std::mem::transmute(self) }
     }
 }
 
