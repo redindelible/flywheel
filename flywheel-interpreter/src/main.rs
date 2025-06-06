@@ -205,8 +205,9 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let prev_frame = &header.prev.as_ref().unwrap().0;
         
         let (parameters, others) = slice.split_at_mut(count);
-        unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count) }
-        others.iter_mut().for_each(|slot| { slot.write(Value::new_none()); });
+        unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count); }
+        unsafe { utils::set_zero_silly(others.as_mut_ptr().cast::<Value>(), others.len()); }
+        // others.iter_mut().for_each(|slot| { slot.write(Value::new_none()); });
         
         let frame = unsafe { frame.assume_init() };
 
@@ -309,7 +310,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..5 {
+    for _ in 0..300 {
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
