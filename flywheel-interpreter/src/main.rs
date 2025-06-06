@@ -203,12 +203,12 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let mut frame = ThinList::from_header_uninit_in(header, required as usize, bump);
         let (header, slice) = frame.parts_mut();
         let prev_frame = &header.prev.as_ref().unwrap().0;
-        
+
         let (parameters, others) = slice.split_at_mut(count);
         unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count); }
         unsafe { utils::set_zero_silly(others.as_mut_ptr().cast::<Value>(), others.len()); }
         // others.iter_mut().for_each(|slot| { slot.write(Value::new_none()); });
-        
+
         let frame = unsafe { frame.assume_init() };
 
         CallFrame { ip, stack: bump, inner: frame }
