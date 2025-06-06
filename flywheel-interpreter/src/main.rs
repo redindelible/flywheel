@@ -3,11 +3,9 @@ mod instr;
 mod builder;
 mod thin;
 mod utils;
-// mod stack;
 
 use std::cell::OnceCell;
 use std::marker::PhantomData;
-use std::ops::Range;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Instant;
@@ -150,12 +148,10 @@ impl<'f> InstrPtr<'f> {
 }
 
 type Bump = bump_scope::Bump<allocator_api2::alloc::Global, 8, false>;
-// type Bump = bump_scope::Bump;
 
 struct CallFrameHeader<'f> {
-    ip: InstrPtr<'f>,
     function: &'f Function,
-    prev: Option<(ThinList<Value, CallFrameHeader<'f>>, u32)>
+    prev: Option<(ThinList<Value, CallFrameHeader<'f>>, InstrPtr<'f>, u32)>
 }
 
 struct CallFrame<'vm, 'f> {
@@ -170,7 +166,6 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let required = function.code.required_registers;
         
         let header = CallFrameHeader {
-            ip,
             function,
             prev: None
         };
@@ -189,15 +184,13 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
     }
 
     unsafe fn push_call_frame(self, function: &'f Function, start: usize, count: usize, dst: u32) -> CallFrame<'vm, 'f> {
-        let CallFrame { ip: old_ip, stack: bump, mut inner } = self;
-        inner.header_mut().ip = old_ip;
+        let CallFrame { ip: old_ip, stack: bump, inner } = self;
         
         let ip = InstrPtr::new(&function.code.instructions);
         let required = function.code.required_registers;
         let header = CallFrameHeader {
-            ip,
             function,
-            prev: Some((inner, dst))
+            prev: Some((inner, old_ip, dst))
         };
 
         let mut frame = ThinList::from_header_uninit_in(header, required as usize, bump);
@@ -207,7 +200,6 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
         let (parameters, others) = slice.split_at_mut(count);
         unsafe { utils::copy_silly(parameters.as_mut_ptr().cast(), prev_frame.slice()[start..].as_ptr(), count); }
         unsafe { utils::set_zero_silly(others.as_mut_ptr().cast::<Value>(), others.len()); }
-        // others.iter_mut().for_each(|slot| { slot.write(Value::new_none()); });
 
         let frame = unsafe { frame.assume_init() };
 
@@ -217,19 +209,16 @@ impl<'vm, 'f> CallFrame<'vm, 'f> {
     unsafe fn pop_call_frame(self) -> Option<(Self, u32)> {
         let CallFrame { ip: _, stack: bump, inner } = self;
 
-        let (new_inner, dst) = inner.deallocate(bump).prev?;
-        Some((CallFrame { ip: new_inner.header().ip, stack: bump, inner: new_inner }, dst))
+        let (new_inner, ip, dst) = inner.deallocate(bump).prev?;
+        Some((CallFrame { ip, stack: bump, inner: new_inner }, dst))
     }
     
     fn ip(&self) -> InstrPtr<'f> {
         self.ip
-        // self.inner.header().ip
     }
     
     unsafe fn offset_ip(&mut self, offset: isize) {
         unsafe { self.ip = self.ip.offset(offset); }
-        // let ip_ref = &mut self.inner.header_mut().ip;
-        // *ip_ref = unsafe { (*ip_ref).offset(offset) };
     }
 
     unsafe fn write_unchecked(&mut self, register: impl Into<usize>, value: Value) {
@@ -310,7 +299,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
 
     let start = Instant::now();
-    for _ in 0..300 {
+    for _ in 0..5 {
         let result = vm.execute(&function, &[Value::from_i32(28)]);
         match result.unwrap().unwrap() {
             UnwrappedValue::Integer(num) => assert_eq!(num, 317811),
