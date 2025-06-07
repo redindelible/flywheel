@@ -1,9 +1,12 @@
 [package]
 name = "flywheel-interpreter"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[profile.release]
+debug = true
 
 [dependencies]
-num_enum = "0.7.3"
-exchange = { path = "../exchange" }
-thin-vec = "0.2.13"
+allocator-api2 = "0.3.0"
+bytemuck = { version = "1.23.0", features = ["derive"] }
+bump-scope = { version = "0.17.0", features = ["allocator-api2-03"] }

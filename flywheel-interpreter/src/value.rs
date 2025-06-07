@@ -1,6 +1,5 @@
 use std::ptr::NonNull;
-
-use crate::gc::GcRef;
+use bytemuck::Zeroable;
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("Currently only 64-bit pointers are supported");
@@ -50,31 +49,32 @@ compile_error!("Currently only 64-bit pointers are supported");
 /// This opens up the lower 3 bits for use as a tag of sorts. If those bits are 000, we know we can
 /// use the `Value` as a [`GCRef`] as-is. Otherwise, the specific value of the tag tells us how
 /// to interpret the 48 remaining payload bits.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Zeroable)]
 pub struct Value(*mut ());
 
+#[derive(Copy, Clone, Debug)]
 pub enum UnwrappedValue {
     None,
     Bool(bool),
     Float(f64),
-    Pointer(GcRef),
+    Pointer(NonNull<()>),
     Integer(i32),
 }
 
 const CANONICAL_NAN: f64 = f64::from_bits(0x7FF8000000000000);
 
 impl Value {
-    fn from_data(data: usize) -> Value {
+    const fn from_data(data: usize) -> Value {
         Value(std::ptr::without_provenance_mut(data))
     }
 
     #[inline(always)]
-    pub fn new_none() -> Value {
+    pub const fn new_none() -> Value {
         Value::from_data(0)
     }
 
     #[inline(always)]
-    pub fn from_float(num: f64) -> Value {
+    pub const fn from_float(num: f64) -> Value {
         let mut bits = !num.to_bits();
         if bits >> 51 == 0 {
             bits = !CANONICAL_NAN.to_bits();
@@ -83,12 +83,12 @@ impl Value {
     }
 
     #[inline(always)]
-    pub fn from_gc(ptr: GcRef) -> Value {
-        let numeric = ptr.as_ptr().as_ptr().addr();
+    pub fn from_gc(ptr: NonNull<()>) -> Value {
+        let numeric = ptr.as_ptr().addr();
         assert_eq!(numeric >> 51, 0);
         assert_eq!(numeric & 0b111, 0);
         assert_ne!(numeric, 0);
-        Value(ptr.as_ptr().as_ptr())
+        Value(ptr.as_ptr())
     }
 
     #[inline(always)]
@@ -101,13 +101,13 @@ impl Value {
         Value::from_data(if value { 0b011 } else { 0b010 })
     }
 
-    pub fn unwrap(&self) -> UnwrappedValue {
+    pub fn unwrap(self) -> UnwrappedValue {
         let numeric = self.0.addr();
         if numeric >> 51 == 0 {
             match numeric & 0b111 {
                 0b000 => {
                     if let Some(ptr) = NonNull::new(self.0) {
-                        UnwrappedValue::Pointer(GcRef::from_ptr(ptr))
+                        UnwrappedValue::Pointer(ptr)
                     } else {
                         UnwrappedValue::None
                     }
@@ -123,5 +123,21 @@ impl Value {
         } else {
             UnwrappedValue::Float(f64::from_bits(!numeric as u64))
         }
+    }
+    
+    pub unsafe fn as_int_unchecked(self) -> i32 {
+        // match self.unwrap() {
+        //     UnwrappedValue::Integer(num) => num,
+        //     _ => unsafe { unreachable_unchecked() }
+        // }
+        (self.0.addr() >> 3) as i32
+    }
+
+    pub unsafe fn as_bool_unchecked(self) -> bool {
+        // match self.unwrap() {
+        //     UnwrappedValue::Bool(value) => value,
+        //     _ => unsafe { unreachable_unchecked() }
+        // }
+        self.0.addr() & 1 == 1
     }
 }
