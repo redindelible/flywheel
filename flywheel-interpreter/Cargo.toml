@@ -3,10 +3,7 @@ name = "flywheel-interpreter"
 version = "0.1.0"
 edition = "2024"
 
-[profile.release]
-debug = true
-
 [dependencies]
 allocator-api2 = "0.3.0"
-bytemuck = { version = "1.23.0", features = ["derive"] }
 bump-scope = { version = "0.17.0", features = ["allocator-api2-03"] }
+bytemuck = { version = "1.23.0", features = ["derive"] }
