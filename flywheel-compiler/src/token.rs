@@ -13,7 +13,7 @@ pub struct Token {
     pub ty: TokenType,
     pub text: Option<InternedString>,
     pub has_leading_whitespace: bool,
-    pub loc: Location,
+    pub location: Location,
 }
 
 impl Token {
@@ -22,7 +22,7 @@ impl Token {
             ty: TokenType::Eof,
             text: None,
             has_leading_whitespace: true,
-            loc: Location { source, offset: u32::MAX, length: 1 },
+            location: Location { source, offset: u32::MAX, length: 1 },
         }
     }
 }
@@ -64,8 +64,8 @@ pub enum TokenType {
     RightParenthesis,
     LeftBracket,
     RightBracket,
-    LeftBrace,
-    RightBrace,
+    LeftCurlyBrace,
+    RightCurlyBrace,
 
     LeftArrow,
 }
@@ -118,8 +118,8 @@ impl TokenType {
             TokenType::RightParenthesis => "')'",
             TokenType::LeftBracket => "'['",
             TokenType::RightBracket => "']'",
-            TokenType::LeftBrace => "'{'",
-            TokenType::RightBrace => "'}'",
+            TokenType::LeftCurlyBrace => "'{'",
+            TokenType::RightCurlyBrace => "'}'",
             TokenType::LeftArrow => "'->'",
         }
     }
