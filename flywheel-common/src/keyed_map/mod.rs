@@ -13,24 +13,25 @@ pub trait KeyMapKey: From<KeyData> + Copy + Clone + Hash + Eq + Debug {
     fn data(&self) -> KeyData;
 }
 
+#[macro_export]
 macro_rules! declare_key_type {
     { $($vis:vis struct $name:ident;)* }  => {
         $(
             #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-            $vis struct $name($crate::utils::KeyData);
+            $vis struct $name($crate::KeyData);
 
-            impl ::std::convert::From<$crate::utils::KeyData> for $name {
-                fn from(value: $crate::utils::KeyData) -> Self {
+            impl ::std::convert::From<$crate::KeyData> for $name {
+                fn from(value: $crate::KeyData) -> Self {
                     Self(value)
                 }
             }
 
-            impl $crate::utils::KeyMapKey for $name {
+            impl $crate::KeyMapKey for $name {
                 #[must_use]
-                fn data(&self) -> $crate::utils::KeyData { self.0 }
+                fn data(&self) -> $crate::KeyData { self.0 }
             }
         )*
     };
 }
 
-pub(crate) use declare_key_type;
+pub use declare_key_type;

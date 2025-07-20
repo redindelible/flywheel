@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use flywheel_common::{InternedString, Interner};
 use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
@@ -10,7 +11,6 @@ use crate::error::{CompileError, CompileResult};
 use crate::parser::Parse;
 use crate::query::Processor;
 use crate::source::{Location, SourceID, SourceInput, Sources};
-use crate::utils::{InternedString, Interner};
 
 #[derive(Copy, Clone)]
 enum NamespaceRef {

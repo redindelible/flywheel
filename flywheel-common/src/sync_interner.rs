@@ -164,7 +164,7 @@ impl<S: BuildHasher> Interner<S> {
         }
     }
 
-    pub(crate) fn resolve(&self, symbol: InternedString) -> &str {
+    pub fn resolve(&self, symbol: InternedString) -> &str {
         self.symbols.read()[symbol.0.get() as usize]
     }
 }

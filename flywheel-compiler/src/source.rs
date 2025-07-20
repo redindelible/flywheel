@@ -4,12 +4,12 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use flywheel_common::{ReservableMap, declare_key_type};
 use triomphe::{Arc, ArcBorrow};
 
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
 use crate::query::Processor;
-use crate::utils::{ReservableMap, declare_key_type};
 
 declare_key_type! {
     pub struct SourceID;

@@ -1,21 +1,21 @@
 
-define %collatz (int %n) int {
-@entry
+define %collatz (int) int {
+@entry [int %n]
     load.local %n
     load.int 1
     le
     branch @base @rec
-@base
+@base [int %n]
     load.int 0
     ret
-@rec
+@rec [int %n]
     load.local %n
     load.int 2
     mod
     load.int 0
     eq
     branch @even @off
-@even
+@even [int %n]
     load.const %collatz
     load.local %n
     load.int 2
@@ -24,7 +24,7 @@ define %collatz (int %n) int {
     load.int 1
     add
     ret
-@odd
+@odd [int %n]
     load.const %collatz
     load.int 3
     load.local %n

@@ -20,11 +20,16 @@ pub struct Function {
     pub name: ArcStr,
     pub parameters: Vec<Type>,
     pub return_type: Type,
-    pub blocks: HashMap<u32, Block>,
+    pub blocks: HashMap<BlockID, Block>,
 }
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct BlockID(pub u32);
 
 #[derive(Debug)]
 pub struct Block {
+    pub retained_locals: Vec<Type>,
+    pub new_locals: Vec<Type>,
     pub instructions: Vec<Instruction>,
     pub terminator: Terminator,
 }
@@ -33,8 +38,6 @@ pub struct Block {
 #[strum_discriminants(name(InstructionKind))]
 #[strum_discriminants(derive(Enum, VariantArray))]
 pub enum Instruction {
-    DeclareLocal,
-    PopLocalsAndYield { count: u32 },
     LoadConst { name: ArcStr },
     LoadLocal { index: u32 },
     StoreLocal { index: u32 },
@@ -55,9 +58,9 @@ pub enum Instruction {
 #[strum_discriminants(name(TerminatorKind))]
 #[strum_discriminants(derive(Enum, VariantArray))]
 pub enum Terminator {
-    Jump { target: u32 },
-    Loop { target: u32 },
-    IfElse { true_target: u32, false_target: u32 },
+    Jump { target: BlockID },
+    Loop { target: BlockID },
+    IfElse { true_target: BlockID, false_target: BlockID },
     Return,
 }
 

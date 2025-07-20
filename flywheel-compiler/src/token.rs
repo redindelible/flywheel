@@ -1,5 +1,6 @@
+use flywheel_common::{InternedString, Interner};
+
 use crate::source::{Location, SourceID};
-use crate::utils::{InternedString, Interner};
 
 pub(super) trait TokenStream {
     fn next(&mut self) -> Option<Token>;

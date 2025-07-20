@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::iter::FusedIterator;
 use std::sync::LazyLock;
 
@@ -8,8 +9,8 @@ use enum_map::{EnumMap, enum_map};
 use logos::{Lexer, Logos};
 use strum::VariantArray;
 
-use crate::Block;
 use crate::interchange::{Function, Global, Instruction, InstructionKind, Terminator, TerminatorKind, TupleType, Type};
+use crate::{Block, BlockID};
 
 #[derive(Logos, PartialEq, Eq, Copy, Clone, Hash, Debug)]
 #[logos(skip r"[ \t\r\n]+")]
@@ -26,6 +27,12 @@ pub enum Token {
     LeftBrace,
     #[token("}")]
     RightBrace,
+    #[token("[")]
+    LeftBracket,
+    #[token("]")]
+    RightBracket,
+    #[token("/")]
+    Slash,
     #[token(",")]
     Comma,
     #[token(":")]
@@ -46,24 +53,27 @@ pub type ParseResult<'s, T> = Result<T, ParseError<'s>>;
 pub enum ParseError<'s> {
     UnexpectedCharacters { after_slice: &'s str },
     UnexpectedEof { after_slice: &'s str },
+    InvalidLiteral { as_type: &'static str, slice: &'s str },
+
     UnexpectedToken { expected: Token, found: Token, slice: &'s str },
-    TooManyLabels { slice: &'s str },
-    StackTooLarge { slice: &'s str },
-    StackUnderflow { slice: &'s str },
+
+    TooManyLocals { slice: &'s str },
     DuplicatedLocal { slice: &'s str },
     UnresolvedLocal { slice: &'s str },
+
+    TooManyLabels { slice: &'s str },
+    UnresolvedLabel { slice: &'s str },
     DuplicatedLabel { slice: &'s str },
-    InvalidLiteral { as_type: &'static str, slice: &'s str },
+
     UnknownInstruction { slice: &'s str },
     InstructionAfterTerminator { slice: &'s str },
     NoTerminator { slice: &'s str },
+
     NotAType { slice: &'s str },
 }
 
 static INSTRUCTION_NAMES: LazyLock<EnumMap<InstructionKind, &'static str>> = LazyLock::new(|| {
     enum_map! {
-            InstructionKind::DeclareLocal => "local",
-            InstructionKind::PopLocalsAndYield => "yield",
             InstructionKind::LoadConst => "load.const",
             InstructionKind::LoadLocal => "load.local",
             InstructionKind::StoreLocal => "store.local",
@@ -97,8 +107,12 @@ struct ModuleParser<'s> {
     instruction_matcher: AhoCorasick,
 
     locals: HashMap<&'s str, u32>,
-    stack_size: u32,
-    labels: HashMap<&'s str, (usize, bool)>,
+    blocks: HashMap<&'s str, BlockInfo>,
+}
+
+struct BlockInfo {
+    id: BlockID,
+    is_defined: bool,
 }
 
 impl<'s> ModuleParser<'s> {
@@ -123,16 +137,7 @@ impl<'s> ModuleParser<'s> {
         let current = lexer.next().map_or(Token::Eof, |tok| tok.unwrap_or(Token::Error));
         let instruction_matcher = Self::instruction_matcher();
 
-        ModuleParser {
-            current,
-            lexer,
-
-            instruction_matcher,
-
-            locals: HashMap::new(),
-            stack_size: 0,
-            labels: HashMap::new(),
-        }
+        ModuleParser { current, lexer, instruction_matcher, locals: HashMap::new(), blocks: HashMap::new() }
     }
 
     fn name_from(&mut self, s: &str) -> ArcStr {
@@ -157,26 +162,33 @@ impl<'s> ModuleParser<'s> {
         }
     }
 
-    fn label_usage(&mut self, label_name: &'s str) -> ParseResult<'s, u32> {
-        let label_id = self.labels.len();
-        let (label_id, _) = self.labels.entry(label_name).or_insert((label_id, false));
-        u32::try_from(*label_id).map_err(|_| ParseError::TooManyLabels { slice: label_name })
+    fn add_local(&mut self, name: &'s str) -> ParseResult<'s, u32> {
+        let Ok(index) = u32::try_from(self.locals.len()) else { return Err(ParseError::TooManyLocals { slice: name }) };
+        if let Some(_old) = self.locals.insert(name, index) {
+            return Err(ParseError::DuplicatedLocal { slice: name });
+        }
+        Ok(index)
     }
 
-    fn push_n(&mut self, n: u32, slice: &'s str) -> ParseResult<'s, ()> {
-        match self.stack_size.checked_add(n) {
-            Some(new_size) => self.stack_size = new_size,
-            None => return Err(ParseError::StackTooLarge { slice }),
+    fn label_reference(&mut self, label_name: &'s str, is_definition: bool) -> ParseResult<'s, BlockID> {
+        let labels_count = self.blocks.len();
+        let label_info = match self.blocks.entry(label_name) {
+            Entry::Occupied(occupied) => occupied.into_mut(),
+            Entry::Vacant(vacant) => {
+                let Ok(id) = u32::try_from(labels_count) else {
+                    return Err(ParseError::TooManyLabels { slice: label_name });
+                };
+                vacant.insert(BlockInfo { id: BlockID(id), is_defined: false })
+            }
+        };
+        if is_definition {
+            if label_info.is_defined {
+                return Err(ParseError::DuplicatedLabel { slice: label_name });
+            } else {
+                label_info.is_defined = true;
+            }
         }
-        Ok(())
-    }
-
-    fn pop_n(&mut self, n: u32, slice: &'s str) -> ParseResult<'s, ()> {
-        match self.stack_size.checked_sub(n) {
-            Some(new_size) => self.stack_size = new_size,
-            None => return Err(ParseError::StackUnderflow { slice }),
-        }
-        Ok(())
+        Ok(label_info.id)
     }
 
     fn next_global(&mut self) -> Option<ParseResult<'s, Global>> {
@@ -190,9 +202,7 @@ impl<'s> ModuleParser<'s> {
     }
 
     fn parse_function_definition(&mut self) -> ParseResult<'s, Function> {
-        self.locals.clear();
-        self.stack_size = 0;
-        self.labels.clear();
+        self.blocks.clear();
 
         self.expect(Token::Def)?;
         let name = self.expect(Token::Name)?;
@@ -202,13 +212,8 @@ impl<'s> ModuleParser<'s> {
         self.expect(Token::LeftParen)?;
         while self.current != Token::RightParen {
             let param_type = self.parse_type()?;
-            let param_name = self.expect(Token::Name)?;
 
             parameters.push(param_type);
-            if let Some(_old) = self.locals.insert(param_name, self.stack_size) {
-                return Err(ParseError::DuplicatedLocal { slice: param_name });
-            }
-            self.push_n(1, param_name)?;
 
             if self.current != Token::Comma {
                 break;
@@ -223,18 +228,35 @@ impl<'s> ModuleParser<'s> {
         self.expect(Token::LeftBrace)?;
         let mut blocks = HashMap::new();
         while self.current != Token::RightBrace {
-            let label_name = self.expect(Token::LabelName)?;
-            let id = self.labels.len();
+            self.locals.clear();
 
-            let &mut (id, ref mut was_declared) = self.labels.entry(label_name).or_insert((id, false));
-            if *was_declared {
-                return Err(ParseError::DuplicatedLabel { slice: label_name });
-            } else {
-                *was_declared = true;
+            let label_name = self.expect(Token::LabelName)?;
+            let label_id = self.label_reference(label_name, true)?;
+
+            let mut retained_locals = vec![];
+            let mut new_locals = vec![];
+            let mut before_slash = true;
+            self.expect(Token::LeftBracket)?;
+            while self.current != Token::RightBracket {
+                let local_type = self.parse_type()?;
+                let local_name = self.expect(Token::Name)?;
+                self.add_local(local_name)?;
+                if before_slash {
+                    retained_locals.push(local_type);
+                } else {
+                    new_locals.push(local_type);
+                }
+
+                if self.current == Token::Comma {
+                    self.expect(Token::Comma)?;
+                } else if self.current == Token::Slash && !before_slash {
+                    self.expect(Token::Slash)?;
+                    before_slash = false;
+                } else {
+                    break;
+                }
             }
-            let Ok(id) = u32::try_from(id) else {
-                return Err(ParseError::TooManyLabels { slice: label_name });
-            };
+            self.expect(Token::RightBracket)?;
 
             let mut instructions = vec![];
             let mut terminator = None;
@@ -250,51 +272,28 @@ impl<'s> ModuleParser<'s> {
                 };
                 let index = match_.pattern().as_usize();
                 if index < InstructionKind::VARIANTS.len() {
-                    instructions.push(self.parse_instruction(InstructionKind::VARIANTS[index], instruction_name)?);
+                    instructions.push(self.parse_instruction(InstructionKind::VARIANTS[index])?);
                 } else {
                     let term_kind = TerminatorKind::VARIANTS[index - InstructionKind::VARIANTS.len()];
-                    terminator = Some(self.parse_terminator(term_kind, instruction_name)?);
+                    terminator = Some(self.parse_terminator(term_kind)?);
                 }
             }
 
             let Some(terminator) = terminator else {
                 return Err(ParseError::NoTerminator { slice: label_name });
             };
-            blocks.insert(id, Block { instructions, terminator });
+            blocks.insert(label_id, Block { retained_locals, new_locals, instructions, terminator });
         }
         self.expect(Token::RightBrace)?;
 
         Ok(Function { name, parameters, return_type, blocks })
     }
 
-    fn parse_instruction(
-        &mut self,
-        instr_kind: InstructionKind,
-        instruction_name: &'s str,
-    ) -> ParseResult<'s, Instruction> {
+    fn parse_instruction(&mut self, instr_kind: InstructionKind) -> ParseResult<'s, Instruction> {
         let instr = match instr_kind {
-            InstructionKind::DeclareLocal => {
-                let local_name = self.expect(Token::Name)?;
-                if let Some(_old) = self.locals.insert(local_name, self.stack_size) {
-                    return Err(ParseError::DuplicatedLocal { slice: local_name });
-                }
-                self.pop_n(1, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::DeclareLocal
-            }
-            InstructionKind::PopLocalsAndYield => {
-                let literal = self.expect(Token::Number)?;
-                let literal = literal
-                    .parse::<u32>()
-                    .map_err(|_| ParseError::InvalidLiteral { as_type: "u32", slice: literal })?;
-                self.pop_n(literal + 1, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::PopLocalsAndYield { count: literal }
-            }
             InstructionKind::LoadConst => {
                 let global_name = self.expect(Token::Name)?;
                 let global_name = self.name_from(global_name);
-                self.push_n(1, instruction_name)?;
 
                 Instruction::LoadConst { name: global_name }
             }
@@ -303,7 +302,6 @@ impl<'s> ModuleParser<'s> {
                 let Some(&index) = self.locals.get(local_name) else {
                     return Err(ParseError::UnresolvedLocal { slice: local_name });
                 };
-                self.push_n(1, instruction_name)?;
 
                 Instruction::LoadLocal { index }
             }
@@ -312,19 +310,14 @@ impl<'s> ModuleParser<'s> {
                 let Some(&index) = self.locals.get(local_name) else {
                     return Err(ParseError::UnresolvedLocal { slice: local_name });
                 };
-                self.pop_n(1, instruction_name)?;
                 Instruction::StoreLocal { index }
             }
-            InstructionKind::LoadUnit => {
-                self.push_n(1, instruction_name)?;
-                Instruction::LoadUnit
-            }
+            InstructionKind::LoadUnit => Instruction::LoadUnit,
             InstructionKind::LoadInteger => {
                 let literal = self.expect(Token::Number)?;
                 let literal = literal
                     .parse::<i64>()
                     .map_err(|_| ParseError::InvalidLiteral { as_type: "i64", slice: literal })?;
-                self.push_n(1, instruction_name)?;
                 Instruction::LoadInteger(literal)
             }
             InstructionKind::LoadFloat => {
@@ -332,12 +325,9 @@ impl<'s> ModuleParser<'s> {
                 let literal = literal
                     .parse::<f64>()
                     .map_err(|_| ParseError::InvalidLiteral { as_type: "f64", slice: literal })?;
-                self.push_n(1, instruction_name)?;
                 Instruction::LoadFloat(literal)
             }
             InstructionKind::Upcast => {
-                self.pop_n(1, instruction_name)?;
-                self.push_n(1, instruction_name)?;
                 let ty = self.parse_type()?;
                 Instruction::Upcast { to_ty: ty }
             }
@@ -346,72 +336,38 @@ impl<'s> ModuleParser<'s> {
                 let literal = literal
                     .parse::<u32>()
                     .map_err(|_| ParseError::InvalidLiteral { as_type: "u32", slice: literal })?;
-                self.pop_n(literal + 1, instruction_name)?;
-                self.push_n(1, instruction_name)?;
                 Instruction::Call { arguments: literal }
             }
-            InstructionKind::LessEqual => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::LessEqual
-            }
-            InstructionKind::Equal => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::Equal
-            }
-            InstructionKind::Add => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::Add
-            }
-            InstructionKind::Mul => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::Mul
-            }
-            InstructionKind::Div => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::Div
-            }
-            InstructionKind::Mod => {
-                self.pop_n(2, instruction_name)?;
-                self.push_n(1, instruction_name)?;
-                Instruction::Mod
-            }
+            InstructionKind::LessEqual => Instruction::LessEqual,
+            InstructionKind::Equal => Instruction::Equal,
+            InstructionKind::Add => Instruction::Add,
+            InstructionKind::Mul => Instruction::Mul,
+            InstructionKind::Div => Instruction::Div,
+            InstructionKind::Mod => Instruction::Mod,
         };
 
         Ok(instr)
     }
 
-    fn parse_terminator(
-        &mut self,
-        term_kind: TerminatorKind,
-        instruction_name: &'s str,
-    ) -> ParseResult<'s, Terminator> {
+    fn parse_terminator(&mut self, term_kind: TerminatorKind) -> ParseResult<'s, Terminator> {
         let term = match term_kind {
             TerminatorKind::IfElse => {
-                self.pop_n(1, instruction_name)?;
                 let true_label = self.expect(Token::LabelName)?;
                 let false_label = self.expect(Token::LabelName)?;
                 Terminator::IfElse {
-                    true_target: self.label_usage(true_label)?,
-                    false_target: self.label_usage(false_label)?,
+                    true_target: self.label_reference(true_label, false)?,
+                    false_target: self.label_reference(false_label, false)?,
                 }
             }
             TerminatorKind::Jump => {
                 let label = self.expect(Token::LabelName)?;
-                Terminator::Jump { target: self.label_usage(label)? }
+                Terminator::Jump { target: self.label_reference(label, false)? }
             }
             TerminatorKind::Loop => {
                 let label = self.expect(Token::LabelName)?;
-                Terminator::Loop { target: self.label_usage(label)? }
+                Terminator::Loop { target: self.label_reference(label, false)? }
             }
-            TerminatorKind::Return => {
-                self.pop_n(1, instruction_name)?;
-                Terminator::Return
-            }
+            TerminatorKind::Return => Terminator::Return,
         };
         Ok(term)
     }

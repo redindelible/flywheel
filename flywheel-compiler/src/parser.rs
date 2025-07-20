@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use flywheel_common::Interner;
 use triomphe::Arc;
 
 use crate::ast::{self, ASTBuilder, AstListRef, AstRef, FileAST};
@@ -9,7 +10,6 @@ use crate::lexer::{Lexer, LexerShared};
 use crate::query::Processor;
 use crate::source::{Location, SourceID};
 use crate::token::{Token, TokenStream, TokenType};
-use crate::utils::Interner;
 
 pub struct Parse(LexerShared);
 

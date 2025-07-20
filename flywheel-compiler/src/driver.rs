@@ -1,6 +1,7 @@
 use std::future::Future;
 
 use camino::Utf8PathBuf;
+use flywheel_common::Interner;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use triomphe::{Arc, ArcBorrow};
@@ -10,7 +11,6 @@ use crate::parser::Parse;
 use crate::query::{Processor, QueryEngine, SupportsQueryOn, query_engine};
 use crate::source::{Source, SourceID, SourceInput, Sources};
 use crate::type_check::{ComputeDeclaredNames, ComputeDefinedTypes, DefinedTypes};
-use crate::utils::Interner;
 
 pub struct FrontendDriver(Handle);
 
