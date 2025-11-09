@@ -1,68 +1,16 @@
+use std::borrow::Cow;
 use std::hash::BuildHasher;
 use std::num::NonZero;
 use std::sync::{Arc, LazyLock};
 
 use hashbrown::HashTable;
 use parking_lot::{Mutex, RwLock};
-use rangemap::RangeMap;
-use stable_deref_trait::StableDeref;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct InternedString(NonZero<u32>);
 
-#[derive(Clone)]
-struct StrBuffer<'a>(&'a str, Arc<dyn StableDeref<Target = str> + Sync + 'a>);
-
-impl<'a> StrBuffer<'a> {
-    fn new<B>(buffer: B) -> Self
-    where
-        B: StableDeref<Target = str> + Sync + 'a,
-    {
-        let item = unsafe { std::mem::transmute::<&str, &'a str>(&*buffer) };
-        StrBuffer(item, Arc::new(buffer))
-    }
-
-    fn str(&self) -> &'a str {
-        self.0
-    }
-}
-
-impl<'a> PartialEq<Self> for StrBuffer<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.1, &other.1)
-    }
-}
-
-impl<'a> Eq for StrBuffer<'a> {}
-
-struct Buffers<'a>(RangeMap<usize, StrBuffer<'a>>);
-
-impl<'a> Buffers<'a> {
-    fn new() -> Self {
-        Buffers(RangeMap::new())
-    }
-
-    fn insert<B>(&mut self, buffer: B)
-    where
-        B: StableDeref<Target = str> + Sync + 'a,
-    {
-        let buffer = StrBuffer::new(buffer);
-        let ptr_range = buffer.str().as_bytes().as_ptr_range();
-        self.0.insert(ptr_range.start.addr()..ptr_range.end.addr(), buffer);
-    }
-
-    fn get_str(&self, str: &str) -> Option<&'a str> {
-        if self.0.contains_key(&str.as_ptr().addr()) {
-            Some(unsafe { std::mem::transmute::<&str, &'a str>(str) })
-        } else {
-            None
-        }
-    }
-}
-
 pub struct Interner<S = rustc_hash::FxBuildHasher> {
-    default_buffers: Mutex<Vec<Box<str>>>,
-    buffers: Mutex<Buffers<'static>>,
+    buffers: Mutex<Vec<Cow<'static, str>>>,
 
     shards: Vec<RwLock<HashTable<(&'static str, InternedString)>>>,
     mask: u64,
@@ -89,8 +37,7 @@ impl<S> Interner<S> {
     pub fn with_shards_and_hasher(shard_count: usize, hasher: S) -> Self {
         assert!(shard_count.is_power_of_two());
         Interner {
-            default_buffers: Mutex::new(Vec::new()),
-            buffers: Mutex::new(Buffers::new()),
+            buffers: Mutex::new(Vec::new()),
             shards: std::iter::repeat_with(|| RwLock::new(HashTable::new())).take(shard_count).collect(),
             mask: shard_count as u64 - 1,
             hasher,
@@ -98,11 +45,8 @@ impl<S> Interner<S> {
         }
     }
 
-    pub fn add_buffer<B>(&self, buffer: B)
-    where
-        B: StableDeref<Target = str> + Sync + 'static,
-    {
-        self.buffers.lock().insert(buffer);
+    pub fn add_buffer(&self, buffer: impl Into<Cow<'static, str>>) {
+        self.buffers.lock().push(buffer.into());
     }
 }
 

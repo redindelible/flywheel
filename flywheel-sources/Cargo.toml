@@ -1,0 +1,13 @@
+[package]
+name = "flywheel-sources"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+camino = "1.1.9"
+memchr = "2.7.4"
+boxcar = "0.2.14"
+rustc-hash = "2.1.0"
+dashmap = "6.1.0"
+quick_cache = "0.6.17"
+hashbrown = "0.16.0"

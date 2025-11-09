@@ -4,7 +4,8 @@ members = [
     "exchange",
     "flywheel-common",
     "flywheel-compiler",
-    "flywheel-interpreter"
+    "flywheel-interpreter",
+    "flywheel-sources",
 ]
 
 #[profile.release]

@@ -1,29 +1,18 @@
-use flywheel_common::{InternedString, Interner};
-
-use crate::source::{Location, SourceID};
-
-pub(super) trait TokenStream {
-    fn next(&mut self) -> Option<Token>;
-
-    fn source_id(&self) -> SourceID;
-    fn interner(&self) -> &Interner;
-}
+use flywheel_sources::{SourceId, Span};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Token {
     pub ty: TokenType,
-    pub text: Option<InternedString>,
     pub has_leading_whitespace: bool,
-    pub loc: Location,
+    pub span: Span,
 }
 
 impl Token {
-    pub const fn new_eof(source: SourceID) -> Token {
+    pub const fn new_eof(source: SourceId) -> Token {
         Token {
             ty: TokenType::Eof,
-            text: None,
             has_leading_whitespace: true,
-            loc: Location { source, offset: u32::MAX, length: 1 },
+            span: Location { source, offset: u32::MAX, length: 1 },
         }
     }
 }

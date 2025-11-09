@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use flywheel_common::{InternedString, Interner};
+use flywheel_sources::{Interner, Source, SourceId, Symbol};
 use regex_automata::meta::Regex;
 use regex_automata::{Anchored, Input, Span};
-use triomphe::{Arc, ArcBorrow};
 
-use crate::source::{Location, SourceID};
-use crate::token::{Token, TokenStream, TokenType};
+use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
 pub struct LexerError {
@@ -53,40 +51,34 @@ const PATTERNS: &[(&str, PatternType)] = &[
 
 #[derive(Clone)]
 pub(super) struct LexerShared {
-    interner: Arc<Interner>,
     regex: Regex,
-    keywords: HashMap<InternedString, TokenType>,
+    // keywords: HashMap<Symbol, TokenType>,
 }
 
 impl LexerShared {
-    pub fn new(interner: &Arc<Interner>) -> LexerShared {
+    pub fn new() -> LexerShared {
         let patterns = PATTERNS.iter().map(|item| item.0).collect::<Vec<&'static str>>();
         let regex = Regex::new_many(&patterns).unwrap();
         LexerShared {
-            interner: interner.clone(),
             regex,
-            keywords: HashMap::from_iter(
-                TokenType::keywords().iter().map(|&(ty, text)| (interner.get_or_intern_static(text), ty)),
-            ),
+            // keywords: HashMap::from_iter(
+            //     TokenType::keywords().iter().map(|&(ty, text)| (interner.get_or_intern_static(text), ty)),
+            // ),
         }
-    }
-
-    pub fn interner(&self) -> ArcBorrow<'_, Interner> {
-        self.interner.borrow_arc()
     }
 }
 
 pub(super) struct Lexer<'a> {
-    interner: &'a Interner,
-    keywords: &'a HashMap<InternedString, TokenType>,
-    source_id: SourceID,
+    // interner: Interner,
+    // keywords: &'a HashMap<Symbol, TokenType>,
+    source_id: SourceId,
     regex: Regex,
     text: &'a str,
     span: Span,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(shared: &'a LexerShared, source_id: SourceID, text: &'a str) -> Lexer<'a> {
+    pub fn new(shared: &'a LexerShared, source_id: SourceId, text: &'a str) -> Lexer<'a> {
         let span = Input::new(text).get_span();
 
         Lexer {
@@ -103,7 +95,6 @@ impl<'a> Lexer<'a> {
         self.try_lex_next().map(|maybe_token| {
             maybe_token.unwrap_or_else(|error| Token {
                 ty: TokenType::Error,
-                text: None,
                 has_leading_whitespace: false,
                 loc: error.loc,
             })
@@ -129,12 +120,7 @@ impl<'a> Lexer<'a> {
                     PatternType::String => {
                         let symbol = self.interner.get_or_intern_in_buffer(&str[1..str.len() - 1]);
                         self.span = input.get_span();
-                        return Some(Ok(Token {
-                            ty: TokenType::String,
-                            text: Some(symbol),
-                            has_leading_whitespace,
-                            loc,
-                        }));
+                        return Some(Ok(Token { ty: TokenType::String, has_leading_whitespace, loc }));
                     }
                     PatternType::Interned(ty_fn) => {
                         let symbol = self.interner.get_or_intern_in_buffer(str);
@@ -155,19 +141,5 @@ impl<'a> Lexer<'a> {
         }
 
         None
-    }
-}
-
-impl TokenStream for Lexer<'_> {
-    fn next(&mut self) -> Option<Token> {
-        self.lex_next()
-    }
-
-    fn source_id(&self) -> SourceID {
-        self.source_id
-    }
-
-    fn interner(&self) -> &Interner {
-        self.interner
     }
 }

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 flywheel-common = { path = "../flywheel-common" }
+flywheel-sources = { path = "../flywheel-sources" }
 dashmap = "6.1.0"
 regex-automata = "0.4.9"
 bumpalo = "3.16.0"
