@@ -2,6 +2,6 @@ mod source;
 mod span;
 mod interner;
 
-pub use source::{SourceId, SourceMap};
-pub use span::Span;
+pub use source::{Source, SourceId, SourceMap};
+pub use span::{Span, SpanInfo};
 pub use interner::{Interner, InternerState, Symbol};

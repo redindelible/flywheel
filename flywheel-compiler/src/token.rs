@@ -1,20 +1,10 @@
-use flywheel_sources::{SourceId, Span};
+use flywheel_sources::Span;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Token {
     pub ty: TokenType,
     pub has_leading_whitespace: bool,
     pub span: Span,
-}
-
-impl Token {
-    pub const fn new_eof(source: SourceId) -> Token {
-        Token {
-            ty: TokenType::Eof,
-            has_leading_whitespace: true,
-            span: Location { source, offset: u32::MAX, length: 1 },
-        }
-    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]

@@ -1,16 +1,19 @@
 use std::num::NonZero;
-use std::ops::Range;
-use std::sync::{Arc, OnceLock};
+use std::ops::{Range, RangeBounds};
+use std::sync::{Arc, Once, OnceLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use memchr::memchr_iter;
 
-use crate::span::{Span, SpanMap};
+use crate::span::{Span, SpanInfo, SpanMap};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct SourceId(pub(crate) NonZero<u32>);
 
-struct SourceInner {
+pub struct Source {
+    id: SourceId,
+    spans: Arc<SpanMap>,
+
     absolute_path: Option<Utf8PathBuf>,
     text: String,
     name: String,
@@ -18,9 +21,21 @@ struct SourceInner {
     line_offsets: OnceLock<Vec<usize>>,
 }
 
-impl SourceInner {
-    fn new(absolute_path: Option<Utf8PathBuf>, name: String, text: String) -> Self {
-        SourceInner { absolute_path, name, text, line_offsets: OnceLock::new() }
+impl Source {
+    pub fn id(&self) -> SourceId {
+        self.id
+    }
+    
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+    
+    pub fn span(&self, range: Range<usize>) -> Span {
+        self.spans.add(SpanInfo {
+            source: self.id,
+            start: range.start,
+            end: range.end
+        })
     }
 
     /// Gets information about the surrounding line of the provided range.
@@ -32,7 +47,7 @@ impl SourceInner {
     /// Panics if `range` is out of bounds for [`text`].
     ///
     /// [`text`]: Self::text
-    fn get_line(&self, range: Range<usize>) -> Option<LineInfo<'_>> {
+    pub fn get_line(&self, range: Range<usize>) -> Option<LineInfo<'_>> {
         assert!(range.start <= range.end && range.end <= self.text.len());
 
         let line_offsets = self
@@ -79,13 +94,17 @@ pub struct SourceMap(pub(crate) Arc<SourceMapInner>);
 impl SourceMap {
     pub fn new() -> SourceMap {
         SourceMap(Arc::new(SourceMapInner {
-            spans: SpanMap::new(),
+            spans: Arc::new(SpanMap::new()),
             sources: boxcar::Vec::new(),
         }))
     }
 
     pub fn add_file(&self, path: Utf8PathBuf, name: String, text: String) -> SourceId {
         self.0.add_file(path, name, text)
+    }
+
+    pub fn get_source(&self, source_id: SourceId) -> &Source {
+        self.0.get_source(source_id)
     }
 }
 
@@ -96,17 +115,27 @@ impl Default for SourceMap {
 }
 
 pub(crate) struct SourceMapInner {
-    spans: SpanMap,
-    sources: boxcar::Vec<SourceInner>,
+    spans: Arc<SpanMap>,
+    sources: boxcar::Vec<Source>,
 }
 
 impl SourceMapInner {
     pub fn add_file(&self, path: Utf8PathBuf, name: String, text: String) -> SourceId {
-        let index = self.sources.push(SourceInner::new(Some(path), name, text));
-        SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX"))
+        let index = self.sources.push_with(move |index| {
+            let id = SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"));
+            Source {
+                id,
+                spans: Arc::clone(&self.spans),
+                absolute_path: Some(path),
+                text,
+                name,
+                line_offsets: OnceLock::new(),
+            }
+        });
+        SourceId(NonZero::new(index as u32 + 1).unwrap())
     }
 
-    pub fn get_source(&self, source_id: SourceId) -> &SourceInner {
+    pub fn get_source(&self, source_id: SourceId) -> &Source {
         self.sources
             .get(source_id.0.get() as usize - 1)
             .expect("The provided SourceId did not refer to a Source in this SourceMap")
@@ -116,7 +145,7 @@ impl SourceMapInner {
     ///
     /// # Safety
     /// `source_id` must have been created by this SourceMap.
-    pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &SourceInner {
+    pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &Source {
         unsafe { self.sources.get_unchecked(source_id.0.get() as usize - 1) }
     }
 

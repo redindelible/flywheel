@@ -1,145 +1,200 @@
-use std::collections::HashMap;
-
-use flywheel_sources::{Interner, Source, SourceId, Symbol};
-use regex_automata::meta::Regex;
-use regex_automata::{Anchored, Input, Span};
-
+use std::ops::Range;
+use flywheel_sources::{Source, Span};
+use crate::lexer::LogosToken::{Binary, Colon, Comma, Comment, Equal, Float, Hexadecimal, Identifier, Integer, LeftAngle, LeftArrow, LeftBrace, LeftBracket, LeftParenthesis, Minus, Percent, Period, Plus, RightAngle, RightBrace, RightBracket, RightParenthesis, Semicolon, Slash, Star, String, Whitespace};
 use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
 pub struct LexerError {
-    loc: Location,
-}
-
-enum PatternType {
-    Whitespace,
-    Comment,
-    String,
-    Interned(TokenType),
-    Basic(TokenType),
-}
-
-const PATTERNS: &[(&str, PatternType)] = &[
-    (r"[ \t\r\n]+", PatternType::Whitespace),
-    (r"#[^\n]+", PatternType::Comment),
-    (r"[_\p{ID_Start}][_\p{ID_Continue}]*", PatternType::Interned(TokenType::Identifier)),
-    (r#""([^"\\]|\\.)*""#, PatternType::String),
-    (r"0b[0-1]+", PatternType::Interned(TokenType::Binary)),
-    (r"0x[a-fA-F0-9]+", PatternType::Interned(TokenType::Hexadecimal)),
-    (r"[0-9]+", PatternType::Interned(TokenType::Integer)),
-    (r"[0-9]+\.[0-9]+", PatternType::Interned(TokenType::Float)),
-    (r"\->", PatternType::Basic(TokenType::LeftArrow)),
-    (r"\.", PatternType::Basic(TokenType::Period)),
-    (r"\,", PatternType::Basic(TokenType::Comma)),
-    (r"\:", PatternType::Basic(TokenType::Colon)),
-    (r"\;", PatternType::Basic(TokenType::Semicolon)),
-    (r"\=", PatternType::Basic(TokenType::Equal)),
-    (r"\+", PatternType::Basic(TokenType::Plus)),
-    (r"\-", PatternType::Basic(TokenType::Minus)),
-    (r"\*", PatternType::Basic(TokenType::Star)),
-    (r"\/", PatternType::Basic(TokenType::Slash)),
-    (r"\%", PatternType::Basic(TokenType::Percent)),
-    (r"\{", PatternType::Basic(TokenType::LeftBrace)),
-    (r"\}", PatternType::Basic(TokenType::RightBrace)),
-    (r"\(", PatternType::Basic(TokenType::LeftParenthesis)),
-    (r"\)", PatternType::Basic(TokenType::RightParenthesis)),
-    (r"\[", PatternType::Basic(TokenType::LeftBracket)),
-    (r"\]", PatternType::Basic(TokenType::RightBracket)),
-    (r"<", PatternType::Basic(TokenType::LeftAngle)),
-    (r">", PatternType::Basic(TokenType::RightAngle)),
-];
-
-#[derive(Clone)]
-pub(super) struct LexerShared {
-    regex: Regex,
-    // keywords: HashMap<Symbol, TokenType>,
-}
-
-impl LexerShared {
-    pub fn new() -> LexerShared {
-        let patterns = PATTERNS.iter().map(|item| item.0).collect::<Vec<&'static str>>();
-        let regex = Regex::new_many(&patterns).unwrap();
-        LexerShared {
-            regex,
-            // keywords: HashMap::from_iter(
-            //     TokenType::keywords().iter().map(|&(ty, text)| (interner.get_or_intern_static(text), ty)),
-            // ),
-        }
-    }
-}
-
-pub(super) struct Lexer<'a> {
-    // interner: Interner,
-    // keywords: &'a HashMap<Symbol, TokenType>,
-    source_id: SourceId,
-    regex: Regex,
-    text: &'a str,
     span: Span,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(shared: &'a LexerShared, source_id: SourceId, text: &'a str) -> Lexer<'a> {
-        let span = Input::new(text).get_span();
+#[derive(logos::Logos)]
+enum LogosToken {
+    #[regex(r"[ \t\r\n]+")]
+    Whitespace,
 
-        Lexer {
-            interner: &shared.interner,
-            keywords: &shared.keywords,
-            source_id,
-            regex: shared.regex.clone(),
-            text,
-            span,
-        }
-    }
+    #[regex(r"#[^\n]+")]
+    Comment,
 
-    fn lex_next(&mut self) -> Option<Token> {
-        self.try_lex_next().map(|maybe_token| {
-            maybe_token.unwrap_or_else(|error| Token {
-                ty: TokenType::Error,
-                has_leading_whitespace: false,
-                loc: error.loc,
-            })
-        })
-    }
+    #[regex(r"[_\p{ID_Start}][_\p{ID_Continue}]*")]
+    Identifier,
 
-    fn try_lex_next(&mut self) -> Option<Result<Token, LexerError>> {
-        let mut input = Input::new(self.text).anchored(Anchored::Yes);
-        input.set_span(self.span);
+    #[regex(r#""([^"\\]|\\.)*""#)]
+    String,
 
+    #[regex(r"0b[0-1]+")]
+    Binary,
+
+    #[regex(r"0x[a-fA-F0-9]+")]
+    Hexadecimal,
+
+    #[regex(r"[0-9]+")]
+    Integer,
+
+    #[regex(r"[0-9]+\.[0-9]+")]
+    Float,
+
+    #[token("->")]
+    LeftArrow,
+
+    #[token(".")]
+    Period,
+
+    #[token(",")]
+    Comma,
+
+    #[token(":")]
+    Colon,
+
+    #[token(";")]
+    Semicolon,
+
+    #[token("=")]
+    Equal,
+
+    #[token("+")]
+    Plus,
+
+    #[token("-")]
+    Minus,
+
+    #[token("*")]
+    Star,
+
+    #[token("/")]
+    Slash,
+
+    #[token("%")]
+    Percent,
+
+    #[token("{")]
+    LeftBrace,
+
+    #[token("}")]
+    RightBrace,
+
+    #[token("(")]
+    LeftParenthesis,
+
+    #[token(")")]
+    RightParenthesis,
+
+    #[token("[")]
+    LeftBracket,
+
+    #[token("]")]
+    RightBracket,
+
+    #[token("<")]
+    LeftAngle,
+
+    #[token(">")]
+    RightAngle,
+}
+
+fn advance_logos(lexer: &mut Option<logos::Lexer<'_, LogosToken>>) -> Option<(TokenType, bool, Range<usize>)> {
+    use LogosToken::*;
+
+    if let Some(inner) = lexer.as_mut() {
         let mut has_leading_whitespace = false;
-        while input.start() < input.haystack().len() {
-            if let Some(match_) = self.regex.search(&input) {
-                let str = &self.text[match_.range()];
-                let loc =
-                    Location { source: self.source_id, offset: input.start() as u32, length: match_.len() as u32 };
-                input.set_start(match_.end());
+        while let Some(logos_type) = inner.next() {
+            let token_type = match logos_type {
+                Ok(Whitespace | Comment) => {
+                    has_leading_whitespace = true;
+                    continue;
+                },
+                Err(()) => TokenType::Error,
+                Ok(Identifier) => TokenType::Identifier,
+                Ok(String) => TokenType::String,
+                Ok(Binary) => TokenType::Binary,
+                Ok(Hexadecimal) => TokenType::Hexadecimal,
+                Ok(Integer) => TokenType::Integer,
+                Ok(Float) => TokenType::Float,
+                Ok(LeftArrow) => TokenType::LeftArrow,
+                Ok(Period) => TokenType::Period,
+                Ok(Comma) => TokenType::Comma,
+                Ok(Colon) => TokenType::Colon,
+                Ok(Semicolon) => TokenType::Semicolon,
+                Ok(Equal) => TokenType::Equal,
+                Ok(Plus) => TokenType::Plus,
+                Ok(Minus) => TokenType::Minus,
+                Ok(Star) => TokenType::Star,
+                Ok(Slash) => TokenType::Slash,
+                Ok(Percent) => TokenType::Percent,
+                Ok(LeftBrace) => TokenType::LeftBrace,
+                Ok(RightBrace) => TokenType::RightBrace,
+                Ok(LeftParenthesis) => TokenType::LeftParenthesis,
+                Ok(RightParenthesis) => TokenType::RightParenthesis,
+                Ok(LeftBracket) => TokenType::LeftBracket,
+                Ok(RightBracket) => TokenType::RightBracket,
+                Ok(LeftAngle) => TokenType::LeftAngle,
+                Ok(RightAngle) => TokenType::RightAngle,
+            };
 
-                match PATTERNS[match_.pattern().as_usize()].1 {
-                    PatternType::Whitespace | PatternType::Comment => {
-                        has_leading_whitespace = true;
-                    }
-                    PatternType::String => {
-                        let symbol = self.interner.get_or_intern_in_buffer(&str[1..str.len() - 1]);
-                        self.span = input.get_span();
-                        return Some(Ok(Token { ty: TokenType::String, has_leading_whitespace, loc }));
-                    }
-                    PatternType::Interned(ty_fn) => {
-                        let symbol = self.interner.get_or_intern_in_buffer(str);
-                        let ty = self.keywords.get(&symbol).copied().unwrap_or(ty_fn);
-                        self.span = input.get_span();
-                        return Some(Ok(Token { ty, text: Some(symbol), has_leading_whitespace, loc }));
-                    }
-                    PatternType::Basic(ty) => {
-                        self.span = input.get_span();
-                        return Some(Ok(Token { ty, text: None, has_leading_whitespace, loc }));
-                    }
-                }
-            } else {
-                return Some(Err(LexerError {
-                    loc: Location { source: self.source_id, offset: input.start() as u32, length: 1 },
-                }));
-            }
+            return Some((token_type, has_leading_whitespace, inner.span()));
         }
 
-        None
+        *lexer = None;
+    }
+
+    None
+}
+
+pub(super) struct Lexer<'a> {
+    source: &'a Source,
+    eof: Span,
+    inner: Option<logos::Lexer<'a, LogosToken>>,
+
+    last: Token,
+    curr: Token,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a Source) -> Lexer<'a> {
+        let text = source.text();
+        let eof = source.span(text.len()..text.len()+1);
+        let mut this = Lexer {
+            source,
+            eof,
+            inner: Some(logos::Lexer::new(text)),
+            last: Token {
+                ty: TokenType::Eof,
+                has_leading_whitespace: false,
+                span: eof,
+            },
+            curr: Token {
+                ty: TokenType::Eof,
+                has_leading_whitespace: false,
+                span: eof,
+            },
+        };
+        this.advance();
+        this
+    }
+
+    pub fn advance(&mut self) -> Token {
+        let token = match advance_logos(&mut self.inner) {
+            Some((ty, has_leading_whitespace, span)) => Token {
+                ty,
+                has_leading_whitespace,
+                span: self.source.span(span),
+            },
+            None => Token {
+                ty: TokenType::Eof,
+                has_leading_whitespace: false,
+                span: self.eof,
+            }
+        };
+        self.last = self.curr;
+        self.curr = token;
+        token
+    }
+    
+    pub fn curr(&self) -> Token {
+        self.curr
+    }
+    
+    pub fn last(&self) -> Token {
+        self.last
     }
 }

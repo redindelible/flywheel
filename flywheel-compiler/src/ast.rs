@@ -170,4 +170,4 @@ pub enum BinaryOp {
     Mod,
 }
 
-pub struct Type<'ast>(Span, PhantomData<&'ast ()>);
+pub struct Type<'ast>(pub Span, pub PhantomData<&'ast ()>);

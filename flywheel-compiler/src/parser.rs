@@ -2,15 +2,13 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use bumpalo::Bump;
-use flywheel_common::Interner;
-use triomphe::Arc;
+
+use flywheel_sources::{SourceMap, SourceId};
 
 use crate::ast::{self, FileAST};
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
 use crate::lexer::{Lexer, LexerShared};
-use crate::query::Processor;
-use crate::source::{Location, SourceID};
 use crate::token::{Token, TokenStream, TokenType};
 
 impl Processor for Parse {
@@ -58,10 +56,8 @@ fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileError 
 
 type ParseResult<T> = Result<T, usize>;
 
-struct Parser<'ast, L> {
-    token_stream: L,
-    last: Option<Token>,
-    curr: Option<Token>,
+struct Parser<'ast> {
+    tokens: Lexer<'ast>,
 
     ast_arena: &'ast Bump,
 
@@ -69,30 +65,23 @@ struct Parser<'ast, L> {
     error: Option<CompileError>,
 }
 
-impl<'ast, L: TokenStream> Parser<'ast, L> {
-    fn new(mut lexer: L, ast_arena: &'ast Bump) -> Self {
-        let curr = lexer.next();
-        Parser { token_stream: lexer, last: None, curr, ast_arena, possible_tokens: HashSet::new(), error: None }
+impl<'ast> Parser<'ast> {
+    fn new(mut lexer: Lexer<'ast>, ast_arena: &'ast Bump) -> Self {
+        Parser { tokens: lexer, ast_arena, possible_tokens: HashSet::new(), error: None }
     }
 
     fn advance(&mut self) -> Token {
-        if let Some(token) = self.curr {
-            self.possible_tokens.clear();
-            (self.last, self.curr) = (self.curr, self.token_stream.next());
-            token
-        } else {
-            Token::new_eof(self.token_stream.source_id())
-        }
+        self.possible_tokens.clear();
+        self.tokens.advance()
     }
 
     fn curr_is_ty(&mut self, ty: TokenType) -> bool {
         self.possible_tokens.insert(ty);
-        let curr_ty = self.curr.map_or(TokenType::Eof, |token| token.ty);
-        curr_ty == ty
+        self.tokens.curr().ty == ty
     }
 
     fn last_was_ty(&mut self, ty: TokenType) -> bool {
-        self.last.is_some_and(|token| token.ty == ty)
+        self.tokens.last().ty == ty
     }
 
     fn error<T>(&mut self, error: CompileError) -> ParseResult<T> {
@@ -101,23 +90,20 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
     }
 
     fn error_expected_none<T>(&mut self) -> ParseResult<T> {
-        let curr = self.curr.unwrap_or(Token::new_eof(self.token_stream.source_id()));
         let tys: Vec<TokenType> = self.possible_tokens.drain().collect();
-        self.error(error_expected_any_of(&tys, curr))
+        self.error(error_expected_any_of(&tys, self.tokens.curr()))
     }
 
     fn expect(&mut self, ty: TokenType) -> ParseResult<Token> {
-        self.possible_tokens.insert(ty);
-        let curr = self.curr.unwrap_or(Token::new_eof(self.token_stream.source_id()));
-        if curr.ty == ty {
+        if self.curr_is_ty(ty) {
             self.advance();
-            Ok(curr)
+            Ok(self.tokens.curr())
         } else {
             self.error_expected_none()
         }
     }
 
-    fn parse_file(&mut self) -> ParseResult<&'ast ast::TopLevel> {
+    fn parse_file(&mut self) -> ParseResult<&'ast [ast::TopLevel<'ast>]> {
         let mut top_levels = vec![];
         while !self.curr_is_ty(TokenType::Eof) {
             top_levels.push(self.parse_top_level()?);
@@ -126,7 +112,7 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         Ok(top_levels)
     }
 
-    fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel> {
+    fn parse_top_level(&mut self) -> ParseResult<ast::TopLevel<'ast>> {
         if self.curr_is_ty(TokenType::Struct) {
             Ok(ast::TopLevel::Struct(self.parse_struct()?))
         } else if self.curr_is_ty(TokenType::Fn) {
@@ -138,14 +124,14 @@ impl<'ast, L: TokenStream> Parser<'ast, L> {
         }
     }
 
-    fn parse_import(&mut self) -> ParseResult<&'ast ast::Import> {
+    fn parse_import(&mut self) -> ParseResult<ast::Import<'ast>> {
         let start = self.expect(TokenType::Import)?;
         let path = self.expect(TokenType::String)?.text.unwrap();
         let end = self.expect(TokenType::Semicolon)?;
-        Ok(self.ast_arena.alloc(ast::Import { relative_path: path, span: start.loc.combine(end.loc) }))
+        Ok(ast::Import { relative_path: path, span: start.loc.combine(end.loc) })
     }
 
-    fn parse_struct(&mut self) -> ParseResult<AstRef<ast::Struct>> {
+    fn parse_struct(&mut self) -> ParseResult<ast::Struct<'ast>> {
         let start = self.expect(TokenType::Struct)?;
         let name = self.expect(TokenType::Identifier)?.text.unwrap();
 
