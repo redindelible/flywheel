@@ -4,13 +4,11 @@ use std::fmt::{Debug, Display, Formatter};
 use triomphe::Arc;
 
 use crate::driver::{FrontendDriver, Handle};
-use crate::source::Location;
 
 pub type CompileResult<T> = Result<T, CompileError>;
 
 #[derive(Debug, Clone, Hash)]
 struct CompileErrorInner {
-    kind: &'static str,
     description: Cow<'static, str>,
     location: Option<Location>,
 }

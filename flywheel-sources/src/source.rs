@@ -25,11 +25,11 @@ impl Source {
     pub fn id(&self) -> SourceId {
         self.id
     }
-    
+
     pub fn text(&self) -> &str {
         &self.text
     }
-    
+
     pub fn span(&self, range: Range<usize>) -> Span {
         self.spans.add(SpanInfo {
             source: self.id,

@@ -1,6 +1,5 @@
 use std::ops::Range;
 use flywheel_sources::{Source, Span};
-use crate::lexer::LogosToken::{Binary, Colon, Comma, Comment, Equal, Float, Hexadecimal, Identifier, Integer, LeftAngle, LeftArrow, LeftBrace, LeftBracket, LeftParenthesis, Minus, Percent, Period, Plus, RightAngle, RightBrace, RightBracket, RightParenthesis, Semicolon, Slash, Star, String, Whitespace};
 use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
@@ -144,32 +143,17 @@ pub(super) struct Lexer<'a> {
     source: &'a Source,
     eof: Span,
     inner: Option<logos::Lexer<'a, LogosToken>>,
-
-    last: Token,
-    curr: Token,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a Source) -> Lexer<'a> {
         let text = source.text();
         let eof = source.span(text.len()..text.len()+1);
-        let mut this = Lexer {
+        Lexer {
             source,
             eof,
             inner: Some(logos::Lexer::new(text)),
-            last: Token {
-                ty: TokenType::Eof,
-                has_leading_whitespace: false,
-                span: eof,
-            },
-            curr: Token {
-                ty: TokenType::Eof,
-                has_leading_whitespace: false,
-                span: eof,
-            },
-        };
-        this.advance();
-        this
+        }
     }
 
     pub fn advance(&mut self) -> Token {
@@ -179,22 +163,24 @@ impl<'a> Lexer<'a> {
                 has_leading_whitespace,
                 span: self.source.span(span),
             },
-            None => Token {
-                ty: TokenType::Eof,
-                has_leading_whitespace: false,
-                span: self.eof,
-            }
+            None => self.eof(),
         };
-        self.last = self.curr;
-        self.curr = token;
         token
     }
     
-    pub fn curr(&self) -> Token {
-        self.curr
+    pub fn eof(&self) -> Token {
+        Token {
+            ty: TokenType::Eof,
+            has_leading_whitespace: false,
+            span: self.eof,
+        }
+    }
+
+    pub fn position(&self) -> usize {
+        self.inner.as_ref().map_or(self.source.text().len(), |lexer| lexer.span().end)
     }
     
-    pub fn last(&self) -> Token {
-        self.last
+    pub fn source(&self) -> &'a Source {
+        self.source
     }
 }
