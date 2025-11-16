@@ -1,4 +1,3 @@
-mod ast;
 mod driver;
 mod error;
 mod lexer;

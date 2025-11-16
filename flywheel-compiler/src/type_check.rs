@@ -4,8 +4,8 @@ use flywheel_common::{InternedString, Interner};
 use futures_util::StreamExt;
 use futures_util::stream::{FuturesOrdered, FuturesUnordered};
 use triomphe::{Arc, ArcBorrow};
-
-use crate::ast::{self, AstRef};
+use flywheel_ast::ast;
+use flywheel_ast::ast::{self, AstRef};
 use crate::driver::Handle;
 use crate::error::{CompileError, CompileResult};
 use crate::parser::Parse;

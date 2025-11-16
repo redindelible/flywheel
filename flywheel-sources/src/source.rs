@@ -1,8 +1,8 @@
 use std::num::NonZero;
-use std::ops::{Range, RangeBounds};
-use std::sync::{Arc, Once, OnceLock};
+use std::ops::Range;
+use std::sync::{Arc, OnceLock};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use memchr::memchr_iter;
 
 use crate::span::{Span, SpanInfo, SpanMap};
@@ -14,7 +14,7 @@ pub struct Source {
     id: SourceId,
     spans: Arc<SpanMap>,
 
-    absolute_path: Option<Utf8PathBuf>,
+    _absolute_path: Option<Utf8PathBuf>,
     text: String,
     name: String,
 
@@ -106,6 +106,18 @@ impl SourceMap {
     pub fn get_source(&self, source_id: SourceId) -> &Source {
         self.0.get_source(source_id)
     }
+
+    pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &Source {
+        unsafe { self.0.get_source_unchecked(source_id) }
+    }
+
+    pub unsafe fn get_span_unchecked(&self, span: Span) -> &str {
+        unsafe { self.0.get_span_unchecked(span) }
+    }
+
+    pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
+        self.0.try_get_span_line(span)
+    }
 }
 
 impl Default for SourceMap {
@@ -126,7 +138,7 @@ impl SourceMapInner {
             Source {
                 id,
                 spans: Arc::clone(&self.spans),
-                absolute_path: Some(path),
+                _absolute_path: Some(path),
                 text,
                 name,
                 line_offsets: OnceLock::new(),
@@ -172,7 +184,7 @@ impl SourceMapInner {
         source.text.get(span_info.start..span_info.end)
     }
 
-    pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo> {
+    pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
         let span_info = self.spans.resolve(span)?;
         let source = self.sources.get(span_info.source.0.get() as usize)?;
         source.get_line(span_info.start..span_info.end)

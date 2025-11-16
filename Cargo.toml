@@ -2,9 +2,11 @@
 resolver = "2"
 members = [
     "exchange",
+    "flywheel-ast",
     "flywheel-common",
-    "flywheel-compiler",
+    "flywheel-compiler", "flywheel-error",
     "flywheel-interpreter",
+    "flywheel-parser",
     "flywheel-sources",
 ]
 

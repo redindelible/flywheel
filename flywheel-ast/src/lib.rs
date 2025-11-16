@@ -22,7 +22,7 @@ impl FileAST {
         Ok(FileAST { _arena: arena, top_levels })
     }
 
-    pub fn top_levels(&self) -> &[TopLevel] {
+    pub fn top_levels(&self) -> &'_ [TopLevel<'_>] {
         self.top_levels
     }
 }
@@ -49,6 +49,7 @@ pub struct Struct<'ast> {
 pub struct Import<'ast> {
     pub relative_path: Span,
     pub span: Span,
+    pub _phantom: PhantomData<&'ast ()>
 }
 
 pub struct StructField<'ast> {
@@ -147,7 +148,7 @@ pub struct Binary<'ast> {
 pub struct IfElse<'ast> {
     pub condition: Expr<'ast>,
     pub then_do: Expr<'ast>,
-    pub else_do: Expr<'ast>,
+    pub else_do: Option<Expr<'ast>>,
     pub span: Span,
 }
 

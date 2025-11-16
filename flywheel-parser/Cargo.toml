@@ -1,0 +1,14 @@
+[package]
+name = "flywheel-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+flywheel-ast = { path = "../flywheel-ast" }
+flywheel-sources = { path = "../flywheel-sources" }
+flywheel-error = { path = "../flywheel-error" }
+bumpalo = "3.16.0"
+logos = "0.15.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
