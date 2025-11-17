@@ -89,49 +89,19 @@ pub struct LineInfo<'s> {
     pub span_end: usize,
 }
 
-pub struct SourceMap(pub(crate) Arc<SourceMapInner>);
-
-impl SourceMap {
-    pub fn new() -> SourceMap {
-        SourceMap(Arc::new(SourceMapInner {
-            spans: Arc::new(SpanMap::new()),
-            sources: boxcar::Vec::new(),
-        }))
-    }
-
-    pub fn add_file(&self, path: Utf8PathBuf, name: String, text: String) -> SourceId {
-        self.0.add_file(path, name, text)
-    }
-
-    pub fn get_source(&self, source_id: SourceId) -> &Source {
-        self.0.get_source(source_id)
-    }
-
-    pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &Source {
-        unsafe { self.0.get_source_unchecked(source_id) }
-    }
-
-    pub unsafe fn get_span_unchecked(&self, span: Span) -> &str {
-        unsafe { self.0.get_span_unchecked(span) }
-    }
-
-    pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
-        self.0.try_get_span_line(span)
-    }
-}
-
-impl Default for SourceMap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub(crate) struct SourceMapInner {
+pub struct SourceMap {
     spans: Arc<SpanMap>,
     sources: boxcar::Vec<Source>,
 }
 
-impl SourceMapInner {
+impl SourceMap {
+    pub fn new() -> SourceMap {
+        SourceMap {
+            spans: Arc::new(SpanMap::new()),
+            sources: boxcar::Vec::new(),
+        }
+    }
+    
     pub fn add_file(&self, path: Utf8PathBuf, name: String, text: String) -> SourceId {
         let index = self.sources.push_with(move |index| {
             let id = SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"));

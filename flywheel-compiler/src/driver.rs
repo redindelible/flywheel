@@ -1,30 +1,15 @@
 use std::future::Future;
-
-use camino::Utf8PathBuf;
+use rayon_core::ThreadPool;
 use flywheel_common::Interner;
-use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
-use triomphe::{Arc, ArcBorrow};
 
-use crate::error::CompileResult;
-use crate::parser::Parse;
-use crate::source::{Source, SourceID, SourceInput, Sources};
-use crate::type_check::{ComputeDeclaredNames, ComputeDefinedTypes, DefinedTypes};
-
-pub struct FrontendDriver(Handle);
-
-#[derive(Clone)]
-pub(super) struct Handle {
-    inner: Arc<Inner>,
-}
 
 struct Inner {
-    runtime: Runtime,
-
-    interner: Arc<Interner>,
+    runtime: ThreadPool,
 }
 
-impl FrontendDriver {
+pub struct Driver(Handle);
+
+impl Driver {
     pub fn new() -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
@@ -45,6 +30,11 @@ impl FrontendDriver {
     }
 }
 
+#[derive(Clone)]
+pub(super) struct Handle {
+    inner: Arc<Inner>,
+}
+
 impl Handle {
     pub(super) fn spawn<Fut>(&self, fut: Fut) -> JoinHandle<Fut::Output>
     where
@@ -60,11 +50,5 @@ impl Handle {
 
     pub(super) fn get_source(&self, source_id: SourceID) -> ArcBorrow<'_, Source> {
         self.inner.query_engine.get_processor::<Sources>().get_source(source_id)
-    }
-}
-
-impl Default for FrontendDriver {
-    fn default() -> Self {
-        FrontendDriver::new()
     }
 }

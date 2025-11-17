@@ -1,22 +1,28 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use crate::source::{SourceMap, SourceMapInner};
+use crate::source::SourceMap;
 use crate::span::Span;
 
 #[derive(Copy, Clone)]
 pub struct Symbol(Span);
 
+impl Symbol {
+    pub fn span(self) -> Span {
+        self.0
+    }
+}
+
 pub struct InternerState {
     deduplicator: Arc<dashmap::DashMap<&'static str, Symbol>>,
-    sources: Arc<SourceMapInner>
+    sources: Arc<SourceMap>
 }
 
 impl InternerState {
-    pub fn new(sources: &SourceMap) -> InternerState {
+    pub fn new(sources: Arc<SourceMap>) -> InternerState {
         InternerState {
             deduplicator: Arc::new(dashmap::DashMap::new()),
-            sources: Arc::clone(&sources.0),
+            sources,
         }
     }
     
@@ -39,7 +45,7 @@ struct StaticString(&'static str);
 pub struct Interner {
     cache: quick_cache::unsync::Cache<StaticString, Symbol>,
     deduplicator: Arc<dashmap::DashMap<&'static str, Symbol>>,
-    sources: Arc<SourceMapInner>,
+    sources: Arc<SourceMap>,
 }
 
 impl Interner {

@@ -3,17 +3,17 @@ use std::marker::PhantomData;
 
 use bumpalo::Bump;
 use flywheel_ast::{self as ast, FileAST};
-use flywheel_sources::{Source, Span};
+use flywheel_sources::{Interner, Source, Span, Symbol};
 use flywheel_error::{CompileError, CompileResult};
 
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
 
 
-pub fn parse_source(source: &Source) -> CompileResult<FileAST> {
+pub fn parse_source(source: &Source, interner: Interner) -> CompileResult<FileAST> {
     FileAST::new(|arena| {
         let lexer = Lexer::new(source);
-        let mut parser = Parser::new(lexer, arena);
+        let mut parser = Parser::new(lexer, interner, arena);
         parser.parse_file().or(Err(parser.error.unwrap()))
     })
 }
@@ -50,6 +50,7 @@ struct Parser<'source, 'ast> {
     last_ty: TokenType,
     last_end: usize,
 
+    interner: Interner,
     ast_arena: &'ast Bump,
 
     possible_tokens: HashSet<TokenType>,
@@ -57,8 +58,17 @@ struct Parser<'source, 'ast> {
 }
 
 impl<'source, 'ast> Parser<'source, 'ast> {
-    fn new(lexer: Lexer<'source>, ast_arena: &'ast Bump) -> Self {
-        Parser { curr: lexer.eof(), last_ty: TokenType::Eof, last_end: 0, tokens: lexer, ast_arena, possible_tokens: HashSet::new(), error: None }
+    fn new(lexer: Lexer<'source>, interner: Interner, ast_arena: &'ast Bump) -> Self {
+        Parser {
+            curr: lexer.eof(),
+            tokens: lexer,
+            last_ty: TokenType::Eof,
+            last_end: 0,
+            interner,
+            ast_arena,
+            possible_tokens: HashSet::new(),
+            error: None
+        }
     }
 
     fn advance(&mut self) -> Token {
@@ -106,6 +116,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         }
     }
 
+    fn expect_symbol(&mut self, ty: TokenType) -> ParseResult<Symbol> {
+        let token = self.expect(ty)?;
+        Ok(self.interner.get_or_intern(token.span))
+    }
+
     // todo move all the allocs to alloc_try_with
     //   should mean the compiler won't keep all the ast structs around
     //   because it got confused by allocation
@@ -125,25 +140,25 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             Ok(ast::TopLevel::Struct(self.ast_arena.alloc(self.parse_struct()?)))
         } else if self.curr_is_ty(TokenType::Fn) {
             Ok(ast::TopLevel::Function(self.ast_arena.alloc(self.parse_function()?)))
-        } else if self.curr_is_ty(TokenType::Import) {
-            Ok(ast::TopLevel::Import(self.ast_arena.alloc(self.parse_import()?)))
+        // } else if self.curr_is_ty(TokenType::Import) {
+        //     Ok(ast::TopLevel::Import(self.ast_arena.alloc(self.parse_import()?)))
         } else {
             self.error_expected_none()
         }
     }
 
-    fn parse_import(&mut self) -> ParseResult<ast::Import<'ast>> {
-        let start = self.start();
-        self.expect(TokenType::Import)?;
-        let path = self.expect(TokenType::String)?.span;
-        self.expect(TokenType::Semicolon)?;
-        Ok(ast::Import { relative_path: path, span: self.span_from(start), _phantom: PhantomData })
-    }
+    // fn parse_import(&mut self) -> ParseResult<ast::Import<'ast>> {
+    //     let start = self.start();
+    //     self.expect(TokenType::Import)?;
+    //     let path = self.expect(TokenType::String)?.span;
+    //     self.expect(TokenType::Semicolon)?;
+    //     Ok(ast::Import { relative_path: path, span: self.span_from(start), _phantom: PhantomData })
+    // }
 
     fn parse_struct(&mut self) -> ParseResult<ast::Struct<'ast>> {
         let start = self.start();
         self.expect(TokenType::Struct)?;
-        let name = self.expect(TokenType::Identifier)?.span;
+        let name = self.expect_symbol(TokenType::Identifier)?;
 
         let mut fields = Vec::new();
         self.expect(TokenType::LeftBrace)?;
@@ -156,7 +171,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
     fn parse_field(&mut self) -> ParseResult<ast::StructField<'ast>> {
         let start = self.start();
-        let name = self.expect(TokenType::Identifier)?.span;
+        let name = self.expect_symbol(TokenType::Identifier)?;
         self.expect(TokenType::Colon)?;
         let ty = self.parse_type()?;
         self.expect(TokenType::Semicolon)?;
@@ -166,7 +181,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_function(&mut self) -> ParseResult<ast::Function<'ast>> {
         let start = self.start();
         self.expect(TokenType::Fn)?;
-        let name = self.expect(TokenType::Identifier)?.span;
+        let name = self.expect_symbol(TokenType::Identifier)?;
         self.expect(TokenType::LeftParenthesis)?;
         self.expect(TokenType::RightParenthesis)?;
         self.expect(TokenType::LeftArrow)?;
@@ -205,7 +220,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         let start = self.start();
         if self.curr_is_ty(TokenType::Let) {
             self.expect(TokenType::Let)?;
-            let name = self.expect(TokenType::Identifier)?.span;
+            let name = self.expect_symbol(TokenType::Identifier)?;
             let ty = if self.curr_is_ty(TokenType::Colon) {
                 self.expect(TokenType::Colon)?;
                 Some(self.parse_type()?)
@@ -273,7 +288,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         loop {
             if self.curr_is_ty(TokenType::Period) {
                 self.advance();
-                let attr = self.expect(TokenType::Identifier)?.span;
+                let attr = self.expect_symbol(TokenType::Identifier)?;
                 left = ast::Expr::Attr(self.ast_arena.alloc(ast::Attr {
                     object: left,
                     attr,
@@ -308,11 +323,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_expr_terminal(&mut self) -> ParseResult<ast::Expr<'ast>> {
         let start = self.start();
         if self.curr_is_ty(TokenType::Identifier) {
-            let name = self.expect(TokenType::Identifier)?;
-            Ok(ast::Expr::Name(name.span))
+            let name = self.expect_symbol(TokenType::Identifier)?;
+            Ok(ast::Expr::Name(name))
         } else if self.curr_is_ty(TokenType::Integer) {
-            let constant = self.expect(TokenType::Integer)?;
-            Ok(ast::Expr::Integer(constant.span))
+            let constant = self.expect_symbol(TokenType::Integer)?;
+            Ok(ast::Expr::Integer(constant))
         } else if self.curr_is_ty(TokenType::LeftBrace) {
             let block = self.parse_block()?;
             Ok(ast::Expr::Block(self.ast_arena.alloc(block)))
@@ -351,8 +366,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     }
 
     fn parse_type(&mut self) -> ParseResult<ast::Type<'ast>> {
-        let token = self.expect(TokenType::Identifier)?;
-        Ok(ast::Type(token.span, PhantomData))
+        let token = self.expect_symbol(TokenType::Identifier)?;
+        Ok(ast::Type(token, PhantomData))
     }
 }
 

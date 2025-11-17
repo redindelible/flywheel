@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bumpalo::Bump;
-use flywheel_sources::Span;
+use flywheel_sources::{Span, Symbol};
 
 pub struct FileAST {
     _arena: Bump,
@@ -30,30 +30,30 @@ impl FileAST {
 pub enum TopLevel<'ast> {
     Function(&'ast Function<'ast>),
     Struct(&'ast Struct<'ast>),
-    Import(&'ast Import<'ast>),
+    // Import(&'ast Import<'ast>),
 }
 
 pub struct Function<'ast> {
-    pub name: Span,
+    pub name: Symbol,
     pub return_type: Type<'ast>,
     pub body: Block<'ast>,
     pub span: Span,
 }
 
 pub struct Struct<'ast> {
-    pub name: Span,
+    pub name: Symbol,
     pub fields: &'ast [StructField<'ast>],
     pub span: Span,
 }
 
-pub struct Import<'ast> {
-    pub relative_path: Span,
-    pub span: Span,
-    pub _phantom: PhantomData<&'ast ()>
-}
+// pub struct Import<'ast> {
+//     pub relative_path: Span,
+//     pub span: Span,
+//     pub _phantom: PhantomData<&'ast ()>
+// }
 
 pub struct StructField<'ast> {
-    pub name: Span,
+    pub name: Symbol,
     pub ty: Type<'ast>,
     pub span: Span,
 }
@@ -72,7 +72,7 @@ pub enum Stmt<'ast> {
 }
 
 pub struct Let<'ast> {
-    pub name: Span,
+    pub name: Symbol,
     pub ty: Option<Type<'ast>>,
     pub value: Expr<'ast>,
     pub span: Span,
@@ -90,11 +90,11 @@ pub struct Return<'ast> {
 }
 
 pub enum Expr<'ast> {
-    Bool(Span),
-    Integer(Span),
-    Float(Span),
-    String(Span),
-    Name(Span),
+    Bool(Symbol),
+    Integer(Symbol),
+    Float(Symbol),
+    String(Symbol),
+    Name(Symbol),
     Block(&'ast Block<'ast>),
     Attr(&'ast Attr<'ast>),
     Index(&'ast Index<'ast>),
@@ -108,7 +108,7 @@ impl Expr<'_> {
     pub fn span(&self) -> Span {
         use Expr::*;
         match self {
-            Bool(span) | Integer(span) | Float(span) | String(span) | Name(span) => *span,
+            Bool(symbol) | Integer(symbol) | Float(symbol) | String(symbol) | Name(symbol) => symbol.span(),
             Block(inner) => inner.span,
             Attr(inner) => inner.span,
             Index(inner) => inner.span,
@@ -122,7 +122,7 @@ impl Expr<'_> {
 
 pub struct Attr<'ast> {
     pub object: Expr<'ast>,
-    pub attr: Span,
+    pub attr: Symbol,
     pub span: Span,
 }
 
@@ -171,4 +171,4 @@ pub enum BinaryOp {
     Mod,
 }
 
-pub struct Type<'ast>(pub Span, pub PhantomData<&'ast ()>);
+pub struct Type<'ast>(pub Symbol, pub PhantomData<&'ast ()>);
