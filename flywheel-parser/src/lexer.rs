@@ -15,6 +15,30 @@ enum LogosToken {
     #[regex(r"#[^\n]+")]
     Comment,
 
+    #[token("fn")]
+    Fn,
+
+    #[token("struct")]
+    Struct,
+
+    #[token("import")]
+    Import,
+
+    #[token("let")]
+    Let,
+
+    #[token("if")]
+    If,
+
+    #[token("else")]
+    Else,
+
+    #[token("while")]
+    While,
+
+    #[token("return")]
+    Return,
+
     #[regex(r"[_\p{ID_Start}][_\p{ID_Continue}]*")]
     Identifier,
 
@@ -103,6 +127,14 @@ fn advance_logos(lexer: &mut Option<logos::Lexer<'_, LogosToken>>) -> Option<(To
                     continue;
                 },
                 Err(()) => TokenType::Error,
+                Ok(Fn) => TokenType::Fn,
+                Ok(Struct) => TokenType::Struct,
+                Ok(Import) => TokenType::Import,
+                Ok(Let) => TokenType::Let,
+                Ok(If) => TokenType::If,
+                Ok(Else) => TokenType::Else,
+                Ok(While) => TokenType::While,
+                Ok(Return) => TokenType::Return,
                 Ok(Identifier) => TokenType::Identifier,
                 Ok(String) => TokenType::String,
                 Ok(Binary) => TokenType::Binary,
@@ -176,8 +208,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn position(&self) -> usize {
-        self.inner.as_ref().map_or(self.source.text().len(), |lexer| lexer.span().end)
+    pub fn span(&self) -> Range<usize> {
+        self.inner.as_ref().map_or(self.source.text().len()..self.source.text().len(), |lexer| lexer.span())
     }
     
     pub fn source(&self) -> &'a Source {

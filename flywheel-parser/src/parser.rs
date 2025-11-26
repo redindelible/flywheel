@@ -14,7 +14,8 @@ pub fn parse_source(source: &Source, interner: Interner) -> CompileResult<FileAS
     FileAST::new(|arena| {
         let lexer = Lexer::new(source);
         let mut parser = Parser::new(lexer, interner, arena);
-        parser.parse_file().or(Err(parser.error.unwrap()))
+
+        parser.parse_file().map_err(|_| parser.error.unwrap())
     })
 }
 
@@ -59,7 +60,7 @@ struct Parser<'source, 'ast> {
 
 impl<'source, 'ast> Parser<'source, 'ast> {
     fn new(lexer: Lexer<'source>, interner: Interner, ast_arena: &'ast Bump) -> Self {
-        Parser {
+        let mut this = Parser {
             curr: lexer.eof(),
             tokens: lexer,
             last_ty: TokenType::Eof,
@@ -68,19 +69,21 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             ast_arena,
             possible_tokens: HashSet::new(),
             error: None
-        }
+        };
+        this.advance();
+        this
     }
 
     fn advance(&mut self) -> Token {
         self.possible_tokens.clear();
         self.last_ty = self.curr.ty;
-        self.last_end = self.tokens.position();
+        self.last_end = self.tokens.span().end;
         self.curr = self.tokens.advance();
         self.curr
     }
 
     fn start(&self) -> Start {
-        Start(self.tokens.position())
+        Start(self.tokens.span().start)
     }
 
     fn span_from(&self, point: Start) -> Span {
@@ -109,8 +112,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
     fn expect(&mut self, ty: TokenType) -> ParseResult<Token> {
         if self.curr_is_ty(ty) {
+            let ret = self.curr;
             self.advance();
-            Ok(self.curr)
+            Ok(ret)
         } else {
             self.error_expected_none()
         }
@@ -367,36 +371,33 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
     fn parse_type(&mut self) -> ParseResult<ast::Type<'ast>> {
         let token = self.expect_symbol(TokenType::Identifier)?;
-        Ok(ast::Type(token, PhantomData))
+        Ok(ast::Type { name: token, phantom: PhantomData })
     }
 }
 
 #[cfg(test)]
 mod test {
-    // use pretty_assertions::assert_eq;
-    //
-    // use super::parse_source;
-    // use flywheel_sources::Source;
-    //
-    // fn render_ast(text: &str, _name: String) -> String {
-    //     parse_source(Source::)
-    //
-    //     ast.pretty(2)
-    // }
-    //
-    // macro_rules! run_ast_test {
-    //     ($s:literal) => {{
-    //         let source = include_str!(concat!("../../test/", $s));
-    //         let expected = include_str!(concat!("../../test/", $s, ".ast"));
-    //         let pretty = render_ast(source.into(), $s.into());
-    //         assert_eq!(pretty, expected, "(Parsed AST) == (Expected AST)");
-    //     }};
-    // }
-    //
-    // #[test]
-    // fn test_simple() {
-    //     run_ast_test!("simple.fly");
-    // }
+    use std::sync::Arc;
+    use pretty_assertions::assert_str_eq;
+    use flywheel_sources::{Interner, SourceMap};
+    use crate::parse_source;
+
+    fn ast_test_file(text: &str, expected_ast: &str) {
+        let sources = Arc::new(SourceMap::new());
+        let interner = Interner::new(Arc::clone(&sources));
+        let source_id = sources.add_file("<test>".into(), "<test>".into(), text.into());
+
+        let file_ast = parse_source(sources.get_source(source_id), interner).unwrap();
+        let actual = format!("{:#?}", file_ast.pretty(&sources));
+
+        assert_str_eq!(actual, expected_ast);
+    }
+
+    #[test]
+    fn test_simple() {
+        ast_test_file(include_str!("../test/simple.fly"), include_str!("../test/simple.fly.ast"));
+    }
+
     //
     // #[test]
     // fn test_simple_return() {

@@ -49,6 +49,14 @@ pub struct Interner {
 }
 
 impl Interner {
+    pub fn new(sources: Arc<SourceMap>) -> Interner {
+        Interner {
+            cache: quick_cache::unsync::Cache::new(1024),
+            deduplicator: Arc::new(dashmap::DashMap::new()),
+            sources
+        }
+    }
+    
     pub fn get_or_intern(&mut self, span: Span) -> Symbol {
         let text: &'static str = unsafe { transmute_lifetime(self.sources.get_span(span)) };
         *self

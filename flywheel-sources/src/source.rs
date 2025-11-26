@@ -10,6 +10,12 @@ use crate::span::{Span, SpanInfo, SpanMap};
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct SourceId(pub(crate) NonZero<u32>);
 
+impl SourceId {
+    pub fn num(&self) -> u64 {
+        self.0.get() as u64 - 1
+    }
+}
+
 pub struct Source {
     id: SourceId,
     spans: Arc<SpanMap>,
@@ -129,6 +135,10 @@ impl SourceMap {
     /// `source_id` must have been created by this SourceMap.
     pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &Source {
         unsafe { self.sources.get_unchecked(source_id.0.get() as usize - 1) }
+    }
+
+    pub fn get_span_info(&self, span: Span) -> SpanInfo {
+        self.spans.resolve(span).expect("The provided Span is invalid for this SourceMap")
     }
 
     pub fn get_span(&self, span: Span) -> &str {

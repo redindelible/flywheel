@@ -1,7 +1,11 @@
+mod pretty;
+
 use std::marker::PhantomData;
 
 use bumpalo::Bump;
 use flywheel_sources::{Span, Symbol};
+
+pub use crate::pretty::Pretty;
 
 pub struct FileAST {
     _arena: Bump,
@@ -171,4 +175,7 @@ pub enum BinaryOp {
     Mod,
 }
 
-pub struct Type<'ast>(pub Symbol, pub PhantomData<&'ast ()>);
+pub struct Type<'ast> {
+    pub name: Symbol, 
+    pub phantom: PhantomData<&'ast ()>,
+}

@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-flywheel-common = { path = "../flywheel-common" }
+flywheel-sources = { path = "../flywheel-sources" }
+flywheel-parser = { path = "../flywheel-parser" }
 parking_lot = "0.12.3"
 camino = "1.1.9"
 memchr = "2.7.4"
