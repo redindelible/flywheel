@@ -1,25 +1,32 @@
-File {
-  top_levels: [
-    Function {
-      name: "main",
-      return_type: Name {
-        name: "u32",
-        location: Location { source: 0, range: 13..16 }
-      },
-      body: Block {
-        stmts: [
-          Return {
-            value: Integer {
-              value: 7,
-              location: Location { source: 0, range: 30..31 }
+FileAST {
+    top_levels: [
+        Function {
+            name: main,
+            return_type: Type {
+                name: u32,
             },
-            location: Location { source: 0, range: 23..32 }
-          }
-        ],
-        trailing_expr: None,
-        location: Location { source: 0, range: 17..34 }
-      },
-      location: Location { source: 0, range: 0..16 }
-    }
-  ]
+            body: Block {
+                stmts: [
+                    Return {
+                        expr: Integer(
+                            7,
+                        ),
+                        span: Span {
+                            source: 0,
+                            range: 23..32,
+                        },
+                    },
+                ],
+                trailing_expr: None,
+                span: Span {
+                    source: 0,
+                    range: 17..34,
+                },
+            },
+            span: Span {
+                source: 0,
+                range: 0..34,
+            },
+        },
+    ],
 }

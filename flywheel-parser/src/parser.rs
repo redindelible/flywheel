@@ -398,11 +398,10 @@ mod test {
         ast_test_file(include_str!("../test/simple.fly"), include_str!("../test/simple.fly.ast"));
     }
 
-    //
-    // #[test]
-    // fn test_simple_return() {
-    //     run_ast_test!("simple-return.fly");
-    // }
+    #[test]
+    fn test_simple_return() {
+        ast_test_file(include_str!("../test/simple-return.fly"), include_str!("../test/simple-return.fly.ast"));
+    }
     //
     // #[test]
     // fn test_simple_struct() {
