@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Formatter};
-use std::hash::BuildHasher;
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::num::NonZero;
 use std::sync::RwLock;
 
@@ -34,7 +34,7 @@ impl TryFrom<u64> for u48 {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy)]
 #[repr(align(8))]
 pub struct Span(SpanInner);
 
@@ -42,6 +42,36 @@ const _: () = const {
     assert!(size_of::<Span>() == 8);
     assert!(align_of::<Span>() == 8);
 };
+
+impl Span {
+    fn from_raw(value: u64) -> Self {
+        unsafe { std::mem::transmute(value) }
+    }
+    
+    fn raw(&self) -> u64 {
+        unsafe { std::mem::transmute_copy(self) }
+    }
+}
+
+impl Clone for Span {
+    fn clone(&self) -> Self {
+        Span::from_raw(self.raw())
+    }
+}
+
+impl PartialEq for Span {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw() == other.raw()
+    }
+}
+
+impl Eq for Span { }
+
+impl Hash for Span {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.raw())
+    }
+}
 
 impl Debug for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

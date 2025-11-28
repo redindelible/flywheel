@@ -1,77 +1,66 @@
-use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
+use flywheel_sources::{LineInfo, SourceMap, Span};
 
-use flywheel_sources::Span;
+pub type CompileResult<T> = Result<T, Box<CompileMessage>>;
 
-pub type CompileResult<T> = Result<T, CompileError>;
 
 #[derive(Debug)]
-pub struct CompileError {
-    description: Cow<'static, str>,
+pub enum Level {
+    Error
+}
+
+impl Display for Level {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Level::Error => "Error",
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct CompileMessage {
+    level: Level,
+    message: String,
     span: Option<Span>,
 }
 
-impl CompileError {
-    pub fn with_description(_kind: &'static str, description: impl Into<Cow<'static, str>>) -> Self {
-        CompileError { description: description.into(), span: None }
+impl CompileMessage {
+    pub fn error(message: impl Into<String>) -> Self {
+        CompileMessage { level: Level::Error, message: message.into(), span: None }
     }
 
-    pub fn with_description_and_location(
-        _kind: &'static str,
-        description: impl Into<Cow<'static, str>>,
-        location: Span,
+    pub fn with_span(
+        mut self,
+        span: Span
     ) -> Self {
-        CompileError {
-            description: description.into(), 
-            span: Some(location),
-        }
-    }
-    
-    pub fn description(&self) -> &str {
-        &*self.description
+        self.span = Some(span);
+        self
     }
 
-    // pub fn display<'a>(&'a self, frontend: &'a FrontendDriver) -> CompileErrorWithHandle<'a> {
-    //     self.display_from_handle(frontend.get_handle())
-    // }
-    // 
-    // fn display_from_handle<'a>(&'a self, handle: &'a Handle) -> CompileErrorWithHandle<'a> {
-    //     CompileErrorWithHandle { error: &self.inner, handle }
-    // }
+    pub fn display<'a>(&'a self, sources: &'a SourceMap) -> CompileErrorWithDisplay<'a> {
+        CompileErrorWithDisplay { error: self, sources }
+    }
 }
 
-// pub struct CompileErrorWithHandle<'a> {
-//     error: &'a CompileErrorInner,
-//     handle: &'a Handle,
-// }
-// 
-// impl Debug for CompileErrorWithHandle<'_> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{:?}", self.error)
-//     }
-// }
-// 
-// impl Display for CompileErrorWithHandle<'_> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         writeln!(f, "Error: {}", &self.error.description)?;
-//         if let Some(location) = self.error.location {
-//             let source = self.handle.get_source(location.source);
-//             let offset = if location.offset == u32::MAX { source.text().len() } else { location.offset as usize };
-//             let (line, line_index, range) = source.get_line(offset, location.length as usize).unwrap();
-//             let line_number = (line_index + 1).to_string();
-//             let padded_size = line_number.len() + 1;
-//             writeln!(f, "{:pad$}--> {name}", "", pad = padded_size, name = source.name())?;
-//             writeln!(f, "{no:>pad$} | {line}", no = line_number, pad = padded_size, line = line)?;
-//             writeln!(
-//                 f,
-//                 "{:pad$}   {:off$}{:^<len$}",
-//                 "",
-//                 "",
-//                 "",
-//                 pad = padded_size,
-//                 off = range.start,
-//                 len = range.len()
-//             )?;
-//         }
-//         Ok(())
-//     }
-// }
+pub struct CompileErrorWithDisplay<'a> {
+    error: &'a CompileMessage,
+    sources: &'a SourceMap,
+}
+
+impl Display for CompileErrorWithDisplay<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}: {}", self.error.level, self.error.message)?;
+        if let Some(span) = self.error.span {
+            let LineInfo { source, text, line_index, span_start, span_end } = self.sources.get_span_line(span);
+            let line_number =  format!("{: >3}", line_index + 1);
+            writeln!(f, " {}--> {}", " ".repeat(line_number.len()), source.name())?;
+            writeln!(f, " {} | {}", line_number, text)?;
+            writeln!(f, " {}   {}{}",
+                " ".repeat(line_number.len()),
+                " ".repeat(span_start),
+                "^".repeat(span_end - span_start),
+            )?;
+        }
+        Ok(())
+    }
+}

@@ -1,4 +1,4 @@
-import "imported.fly";
+from .imported import foo
 
 struct Foo {
     foo: u32;

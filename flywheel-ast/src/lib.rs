@@ -1,5 +1,6 @@
 mod pretty;
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use bumpalo::Bump;
@@ -7,12 +8,16 @@ use flywheel_sources::{Span, Symbol};
 
 pub use crate::pretty::Pretty;
 
-pub struct FileAST {
+pub struct Module {
+    pub contents: HashMap<Vec<Symbol>, File>,
+}
+
+pub struct File {
     _arena: Bump,
     top_levels: &'static [TopLevel<'static>],
 }
 
-impl FileAST {
+impl File {
     pub fn new<E, F>(constructor: F) -> Result<Self, E>
     where
         F: for<'ast> FnOnce(&'ast Bump) -> Result<&'ast [TopLevel<'ast>], E>,
@@ -23,7 +28,7 @@ impl FileAST {
             let temp_top_levels = constructor(arena_ref)?;
             unsafe { std::mem::transmute::<&'_ [TopLevel<'_>], &'static [TopLevel<'static>]>(temp_top_levels) }
         };
-        Ok(FileAST { _arena: arena, top_levels })
+        Ok(File { _arena: arena, top_levels })
     }
 
     pub fn top_levels(&self) -> &'_ [TopLevel<'_>] {

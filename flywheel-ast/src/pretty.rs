@@ -2,8 +2,8 @@ use std::fmt::{Debug, Formatter};
 use flywheel_sources::SourceMap;
 use crate::*;
 
-impl FileAST {
-    pub fn pretty<'a>(&'a self, sources: &'a SourceMap) -> Pretty<'a, &'a FileAST> {
+impl File {
+    pub fn pretty<'a>(&'a self, sources: &'a SourceMap) -> Pretty<'a, &'a File> {
         Pretty { inner: self, sources }
     }
 }
@@ -19,7 +19,7 @@ impl<'a, T> Pretty<'a, T> {
     }
 }
 
-impl<'a> Debug for Pretty<'a, &'a FileAST> {
+impl<'a> Debug for Pretty<'a, &'a File> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileAST")
             .field("top_levels", &self.child(&self.inner.top_levels))

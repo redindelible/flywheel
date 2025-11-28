@@ -180,7 +180,7 @@ pub(super) struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a Source) -> Lexer<'a> {
         let text = source.text();
-        let eof = source.span(text.len()..text.len()+1);
+        let eof = source.add_span(text.len()..text.len()+1);
         Lexer {
             source,
             eof,
@@ -193,7 +193,7 @@ impl<'a> Lexer<'a> {
             Some((ty, has_leading_whitespace, span)) => Token {
                 ty,
                 has_leading_whitespace,
-                span: self.source.span(span),
+                span: self.source.add_span(span),
             },
             None => self.eof(),
         };

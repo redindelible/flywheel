@@ -1,47 +1,49 @@
-use std::ops::Deref;
+use std::collections::HashMap;
 use std::sync::Arc;
-use rayon_core::{ThreadPool, ThreadPoolBuilder};
-use flywheel_sources::{Interner, InternerState, SourceMap};
 
-struct Inner {
-    runtime: ThreadPool,
+use camino::Utf8Path;
+// use rayon_core::{ThreadPool, ThreadPoolBuilder};
+
+use flywheel_error::{CompileMessage, CompileResult};
+use flywheel_parser::parse_source;
+use flywheel_ast as ast;
+use flywheel_sources::{InternerState, SourceMap, Symbol};
+
+pub struct Driver {
+    // runtime: ThreadPool,
     interner_state: InternerState,
     sources: Arc<SourceMap>,
 }
 
-pub struct Driver(Handle);
-
 impl Driver {
     pub fn new() -> Self {
-        let runtime = ThreadPoolBuilder::new().build().unwrap();
+        // let runtime = ThreadPoolBuilder::new().build().unwrap();
         let sources = Arc::new(SourceMap::new());
 
-        Driver(Handle {
-            inner:
-            Arc::new(Inner {
-                runtime,
-                interner_state: InternerState::new(Arc::clone(&sources)),
-                sources,
-            })
-        })
+        Driver {
+            // runtime,
+            interner_state: InternerState::new(Arc::clone(&sources)),
+            sources,
+        }
     }
-}
 
-impl Deref for Driver {
-    type Target = Handle;
+    pub fn load_module(&mut self, path: impl AsRef<Utf8Path>) -> CompileResult<()> {
+        let mut interner = self.interner_state.interner();
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+        let mut queue = vec![(vec![], path.as_ref().join("main.fly"))];
+        let mut contents: HashMap<Vec<Symbol>, ast::File> = HashMap::new();
 
-#[derive(Clone)]
-pub struct Handle {
-    inner: Arc<Inner>,
-}
-
-impl Handle {
-    pub fn interner(&self) -> Interner {
-        self.inner.interner_state.interner()
+        while let Some((module_relative_path, path)) = queue.pop() {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                let message = format!("could not read from {}", &path);
+                return Err(Box::new(CompileMessage::error(message)));
+            };
+            let source = self.sources.add_file(path, text);
+            let file_ast = parse_source(source, &mut interner)?;
+            contents.insert(module_relative_path, file_ast);
+        }
+        
+        let _ = ast::Module { contents };
+        Ok(())
     }
 }

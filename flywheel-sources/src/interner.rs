@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::source::SourceMap;
 use crate::span::Span;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Symbol(Span);
 
 impl Symbol {

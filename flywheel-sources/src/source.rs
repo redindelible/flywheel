@@ -36,7 +36,9 @@ impl Source {
         &self.text
     }
 
-    pub fn span(&self, range: Range<usize>) -> Span {
+    pub fn name(&self) -> &str { &self.name }
+
+    pub fn add_span(&self, range: Range<usize>) -> Span {
         self.spans.add(SpanInfo {
             source: self.id,
             start: range.start,
@@ -71,6 +73,7 @@ impl Source {
         };
         if range.end <= line_end {
             Some(LineInfo {
+                source: self,
                 text: &self.text[line_start..line_end],
                 line_index,
                 span_start: range.start - line_start,
@@ -85,6 +88,8 @@ impl Source {
 /// Contains information about the full line that contains a range of text.
 #[derive(Copy, Clone)]
 pub struct LineInfo<'s> {
+    /// The source containing this span.
+    pub source: &'s Source,
     /// The full line, not including the newline at the end.
     pub text: &'s str,
     /// 0-indexed count of which line this is from the start of the source.
@@ -108,19 +113,19 @@ impl SourceMap {
         }
     }
     
-    pub fn add_file(&self, path: Utf8PathBuf, name: String, text: String) -> SourceId {
+    pub fn add_file(&self, path: Utf8PathBuf, text: String) -> &Source {
         let index = self.sources.push_with(move |index| {
             let id = SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"));
             Source {
                 id,
                 spans: Arc::clone(&self.spans),
-                _absolute_path: Some(path),
                 text,
-                name,
+                name: path.to_string(),
+                _absolute_path: Some(path),
                 line_offsets: OnceLock::new(),
             }
         });
-        SourceId(NonZero::new(index as u32 + 1).unwrap())
+        self.sources.get(index).unwrap()
     }
 
     pub fn get_source(&self, source_id: SourceId) -> &Source {
@@ -143,6 +148,10 @@ impl SourceMap {
 
     pub fn get_span(&self, span: Span) -> &str {
         self.try_get_span(span).expect("The provided Span is invalid for this SourceMap")
+    }
+
+    pub fn get_span_line(&self, span: Span) -> LineInfo<'_> {
+        self.try_get_span_line(span).expect("The provided Span is invalid for this SourceMap")
     }
 
     pub unsafe fn get_span_unchecked(&self, span: Span) -> &str {

@@ -2,25 +2,25 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use bumpalo::Bump;
-use flywheel_ast::{self as ast, FileAST};
+use flywheel_ast::{self as ast, File};
 use flywheel_sources::{Interner, Source, Span, Symbol};
-use flywheel_error::{CompileError, CompileResult};
+use flywheel_error::{CompileMessage, CompileResult};
 
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
 
 
-pub fn parse_source(source: &Source, interner: Interner) -> CompileResult<FileAST> {
-    FileAST::new(|arena| {
+pub fn parse_source(source: &Source, interner: &mut Interner) -> CompileResult<File> {
+    File::new(|arena| {
         let lexer = Lexer::new(source);
         let mut parser = Parser::new(lexer, interner, arena);
 
-        parser.parse_file().map_err(|_| parser.error.unwrap())
+        parser.parse_file().map_err(|_| Box::new(parser.error.unwrap()))
     })
 }
 
-fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileError {
-    let description = match possible {
+fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileMessage {
+    let message = match possible {
         [] => unreachable!(),
         [item] => {
             format!("Got {}, expected {}.", actual.ty.name(), item.name())
@@ -37,7 +37,7 @@ fn error_expected_any_of(possible: &[TokenType], actual: Token) -> CompileError 
             )
         }
     };
-    CompileError::with_description_and_location("parse/expected-any-of", description, actual.span)
+    CompileMessage::error(message).with_span(actual.span)
 }
 
 type ParseResult<T> = Result<T, usize>;
@@ -51,15 +51,15 @@ struct Parser<'source, 'ast> {
     last_ty: TokenType,
     last_end: usize,
 
-    interner: Interner,
+    interner: &'source mut Interner,
     ast_arena: &'ast Bump,
 
     possible_tokens: HashSet<TokenType>,
-    error: Option<CompileError>,
+    error: Option<CompileMessage>,
 }
 
 impl<'source, 'ast> Parser<'source, 'ast> {
-    fn new(lexer: Lexer<'source>, interner: Interner, ast_arena: &'ast Bump) -> Self {
+    fn new(lexer: Lexer<'source>, interner: &'source mut Interner, ast_arena: &'ast Bump) -> Self {
         let mut this = Parser {
             curr: lexer.eof(),
             tokens: lexer,
@@ -87,7 +87,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     }
 
     fn span_from(&self, point: Start) -> Span {
-        self.tokens.source().span(point.0..self.last_end)
+        self.tokens.source().add_span(point.0..self.last_end)
     }
 
     fn curr_is_ty(&mut self, ty: TokenType) -> bool {
@@ -99,7 +99,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         self.last_ty == ty
     }
 
-    fn error<T>(&mut self, error: CompileError) -> ParseResult<T> {
+    fn error<T>(&mut self, error: CompileMessage) -> ParseResult<T> {
         assert!(self.error.is_none());
         self.error = Some(error);
         Err(0)
@@ -384,10 +384,10 @@ mod test {
 
     fn ast_test_file(text: &str, expected_ast: &str) {
         let sources = Arc::new(SourceMap::new());
-        let interner = Interner::new(Arc::clone(&sources));
-        let source_id = sources.add_file("<test>".into(), "<test>".into(), text.into());
+        let mut interner = Interner::new(Arc::clone(&sources));
+        let source = sources.add_file("<test>".into(), text.into());
 
-        let file_ast = parse_source(sources.get_source(source_id), interner).unwrap();
+        let file_ast = parse_source(source, &mut interner).unwrap();
         let actual = format!("{:#?}", file_ast.pretty(&sources));
 
         assert_str_eq!(actual, expected_ast);
