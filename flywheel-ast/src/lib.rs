@@ -2,7 +2,7 @@ mod pretty;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-
+use std::sync::Mutex;
 use bumpalo::Bump;
 use flywheel_sources::{Span, Symbol};
 
@@ -13,7 +13,7 @@ pub struct Module {
 }
 
 pub struct File {
-    _arena: Bump,
+    _arena: Mutex<Bump>,
     top_levels: &'static [TopLevel<'static>],
 }
 
@@ -28,7 +28,7 @@ impl File {
             let temp_top_levels = constructor(arena_ref)?;
             unsafe { std::mem::transmute::<&'_ [TopLevel<'_>], &'static [TopLevel<'static>]>(temp_top_levels) }
         };
-        Ok(File { _arena: arena, top_levels })
+        Ok(File { _arena: Mutex::new(arena), top_levels })
     }
 
     pub fn top_levels(&self) -> &'_ [TopLevel<'_>] {
@@ -181,6 +181,6 @@ pub enum BinaryOp {
 }
 
 pub struct Type<'ast> {
-    pub name: Symbol, 
+    pub name: Symbol,
     pub phantom: PhantomData<&'ast ()>,
 }
