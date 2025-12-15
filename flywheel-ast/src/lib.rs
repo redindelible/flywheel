@@ -39,7 +39,7 @@ impl File {
 pub enum TopLevel<'ast> {
     Function(&'ast Function<'ast>),
     Struct(&'ast Struct<'ast>),
-    // Import(&'ast Import<'ast>),
+    Import(&'ast Import<'ast>),
 }
 
 pub struct Function<'ast> {
@@ -55,11 +55,12 @@ pub struct Struct<'ast> {
     pub span: Span,
 }
 
-// pub struct Import<'ast> {
-//     pub relative_path: Span,
-//     pub span: Span,
-//     pub _phantom: PhantomData<&'ast ()>
-// }
+pub struct Import<'ast> {
+    pub anchor: Option<Symbol>,
+    pub path: &'ast [Symbol],
+    pub item: Symbol,
+    pub span: Span,
+}
 
 pub struct StructField<'ast> {
     pub name: Symbol,

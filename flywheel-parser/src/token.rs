@@ -20,6 +20,7 @@ pub enum TokenType {
     Identifier,
 
     Fn,
+    From,
     Struct,
     Import,
     Let,
@@ -54,6 +55,7 @@ impl TokenType {
     pub(super) const fn keywords() -> &'static [(TokenType, &'static str)] {
         &[
             (TokenType::Fn, "fn"),
+            (TokenType::From, "from"),
             (TokenType::Struct, "struct"),
             (TokenType::Import, "import"),
             (TokenType::Let, "let"),
@@ -75,6 +77,7 @@ impl TokenType {
             TokenType::Float => "a floating-point number",
             TokenType::Identifier => "an identifier",
             TokenType::Fn => "'fn'",
+            TokenType::From => "'from'",
             TokenType::Struct => "'struct'",
             TokenType::Import => "'import'",
             TokenType::Let => "'let'",

@@ -54,7 +54,7 @@ struct Parser<'source, 'ast> {
     interner: &'source mut Interner,
     ast_arena: &'ast Bump,
 
-    possible_tokens: HashSet<TokenType>,
+    possible_tokens: HashSet<TokenType>,  // TODO this could probably be a u64
     error: Option<CompileMessage>,
 }
 
@@ -144,20 +144,37 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             Ok(ast::TopLevel::Struct(self.ast_arena.alloc(self.parse_struct()?)))
         } else if self.curr_is_ty(TokenType::Fn) {
             Ok(ast::TopLevel::Function(self.ast_arena.alloc(self.parse_function()?)))
-        // } else if self.curr_is_ty(TokenType::Import) {
-        //     Ok(ast::TopLevel::Import(self.ast_arena.alloc(self.parse_import()?)))
+        } else if self.curr_is_ty(TokenType::From) {
+            Ok(ast::TopLevel::Import(self.ast_arena.alloc(self.parse_import()?)))
         } else {
             self.error_expected_none()
         }
     }
 
-    // fn parse_import(&mut self) -> ParseResult<ast::Import<'ast>> {
-    //     let start = self.start();
-    //     self.expect(TokenType::Import)?;
-    //     let path = self.expect(TokenType::String)?.span;
-    //     self.expect(TokenType::Semicolon)?;
-    //     Ok(ast::Import { relative_path: path, span: self.span_from(start), _phantom: PhantomData })
-    // }
+    fn parse_import(&mut self) -> ParseResult<ast::Import<'ast>> {
+        let start = self.start();
+        self.expect(TokenType::From)?;
+
+        let anchor: Option<Symbol>;
+        if self.curr_is_ty(TokenType::Identifier) {
+            anchor = Some(self.expect_symbol(TokenType::Identifier)?);
+        } else {
+            anchor = None;
+        }
+
+        let mut path = Vec::new();
+        while self.curr_is_ty(TokenType::Period) {
+            self.advance();
+            path.push(self.expect_symbol(TokenType::Identifier)?);
+        }
+        let path = self.ast_arena.alloc_slice_copy(&path);
+
+        self.expect(TokenType::Import)?;
+
+        let item = self.expect_symbol(TokenType::Identifier)?;
+        self.expect(TokenType::Semicolon)?;
+        Ok(ast::Import { anchor, path, item, span: self.span_from(start) })
+    }
 
     fn parse_struct(&mut self) -> ParseResult<ast::Struct<'ast>> {
         let start = self.start();
@@ -402,7 +419,7 @@ mod test {
     fn test_simple_return() {
         ast_test_file(include_str!("../test/simple-return.fly"), include_str!("../test/simple-return.fly.ast"));
     }
-    //
+
     // #[test]
     // fn test_simple_struct() {
     //     run_ast_test!("simple-struct.fly");
@@ -412,9 +429,9 @@ mod test {
     // fn test_control_flow() {
     //     run_ast_test!("control-flow.fly");
     // }
-    //
-    // #[test]
-    // fn test_import() {
-    //     run_ast_test!("import.fly");
-    // }
+
+    #[test]
+    fn test_import() {
+        ast_test_file(include_str!("../test/import.fly"), include_str!("../test/import.fly.ast"));
+    }
 }

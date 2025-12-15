@@ -1,8 +1,4 @@
-from .imported import foo
-
-struct Foo {
-    foo: u32;
-}
+from .imported import foo;
 
 fn main() -> u32 {
     return 7;

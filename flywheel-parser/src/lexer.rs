@@ -18,6 +18,9 @@ enum LogosToken {
     #[token("fn")]
     Fn,
 
+    #[token("from")]
+    From,
+
     #[token("struct")]
     Struct,
 
@@ -128,6 +131,7 @@ fn advance_logos(lexer: &mut Option<logos::Lexer<'_, LogosToken>>) -> Option<(To
                 },
                 Err(()) => TokenType::Error,
                 Ok(Fn) => TokenType::Fn,
+                Ok(From) => TokenType::From,
                 Ok(Struct) => TokenType::Struct,
                 Ok(Import) => TokenType::Import,
                 Ok(Let) => TokenType::Let,
@@ -199,7 +203,7 @@ impl<'a> Lexer<'a> {
         };
         token
     }
-    
+
     pub fn eof(&self) -> Token {
         Token {
             ty: TokenType::Eof,
@@ -211,7 +215,7 @@ impl<'a> Lexer<'a> {
     pub fn span(&self) -> Range<usize> {
         self.inner.as_ref().map_or(self.source.text().len()..self.source.text().len(), |lexer| lexer.span())
     }
-    
+
     pub fn source(&self) -> &'a Source {
         self.source
     }

@@ -126,12 +126,20 @@ macro_rules! ast_enum_pretty_impl {
 ast_pretty!(enum TopLevel {
     Function,
     Struct,
+    Import,
 });
 
 ast_pretty!(struct Function {
     name,
     return_type,
     body,
+    span,
+});
+
+ast_pretty!(struct Import {
+    anchor,
+    path,
+    item,
     span,
 });
 

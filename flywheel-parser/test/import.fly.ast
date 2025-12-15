@@ -1,29 +1,43 @@
-File {
-  top_levels: [
-    Import {
-      relative_path: "\"imported.fly\"",
-      location: Location { source: 0, range: 0..22 }
-    },
-    Function {
-      name: "main",
-      return_type: Name {
-        name: "u32",
-        location: Location { source: 0, range: 39..42 }
-      },
-      body: Block {
-        stmts: [
-          Return {
-            value: Integer {
-              value: 7,
-              location: Location { source: 0, range: 57..58 }
+FileAST {
+    top_levels: [
+        Import {
+            anchor: None,
+            path: [
+                imported,
+            ],
+            item: foo,
+            span: Span {
+                source: 0,
+                range: 0..26,
             },
-            location: Location { source: 0, range: 50..59 }
-          }
-        ],
-        trailing_expr: None,
-        location: Location { source: 0, range: 43..62 }
-      },
-      location: Location { source: 0, range: 26..42 }
-    }
-  ]
+        },
+        Function {
+            name: main,
+            return_type: Type {
+                name: u32,
+            },
+            body: Block {
+                stmts: [
+                    Return {
+                        expr: Integer(
+                            7,
+                        ),
+                        span: Span {
+                            source: 0,
+                            range: 54..63,
+                        },
+                    },
+                ],
+                trailing_expr: None,
+                span: Span {
+                    source: 0,
+                    range: 47..66,
+                },
+            },
+            span: Span {
+                source: 0,
+                range: 30..66,
+            },
+        },
+    ],
 }
