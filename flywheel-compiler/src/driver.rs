@@ -67,6 +67,7 @@ impl Driver {
 
 
 struct ModuleLoader<'a> {
+    root: &'a Utf8Path,
     sources: &'a SourceMap,
     interners: &'a ObjectPool<Interner>,
 
@@ -77,6 +78,7 @@ struct ModuleLoader<'a> {
 impl ModuleLoader<'_> {
     fn load(runtime: &ThreadPool, root: &Utf8Path, sources: &SourceMap, interners: &ObjectPool<Interner>) -> CompileResult<ast::Module> {
         let this = ModuleLoader {
+            root,
             sources,
             interners,
             contents: Mutex::new(HashMap::new()),
@@ -84,7 +86,7 @@ impl ModuleLoader<'_> {
         };
 
         runtime.in_place_scope(|scope| {
-            this.load_file(scope, root.join("main.fly"), vec![]);
+            this.load_file(scope, vec![]);
         });
 
         let mut errors = this.errors.into_inner().unwrap();
@@ -102,23 +104,28 @@ impl ModuleLoader<'_> {
         }
     }
 
-    fn load_file<'a>(&'a self, scope: &Scope<'a>, path: Utf8PathBuf, path_in_module: Vec<Symbol>) {
-        let slot: Arc<OnceLock<ast::File>> = match self.contents.lock().unwrap().entry(path_in_module) {
+    fn load_file<'a>(&'a self, scope: &Scope<'a>, path_in_module: Vec<Symbol>) {
+        let slot: Arc<OnceLock<ast::File>> = match self.contents.lock().unwrap().entry(path_in_module.clone()) {
             Entry::Vacant(vacant) => {
-                vacant.insert(Arc::new(OnceLock::new())).clone()
+                Arc::clone(vacant.insert(Arc::new(OnceLock::new())))
             }
             Entry::Occupied(_) => return,
         };
 
         scope.spawn(move |scope| {
+            let mut path = self.root.to_owned();
+            for segment in &path_in_module {
+                path.push(self.sources.get_span(segment.span()));
+            }
+            if path.is_dir() {
+                path.push("main.fly");
+            } else {
+                path.set_extension("fly");
+            }
+
             let result = match std::fs::read_to_string(&path) {
                 Ok(text) => {
                     let source = self.sources.add_file(path, text);
-
-                    for () in vec![] {
-                        self.load_file(scope, todo!(), todo!());
-                    }
-
                     self.interners.with(|interner| parse_source(source, interner))
                 }
                 Err(_) => {
@@ -129,6 +136,16 @@ impl ModuleLoader<'_> {
 
             match result {
                 Ok(file) => {
+                    for top_level in file.top_levels() {
+                        if let ast::TopLevel::Import(import) = *top_level {
+                            if import.anchor.is_none() {
+                                self.load_file(scope, import.path.to_vec());
+                            } else {
+                                todo!()
+                            }
+                        }
+                    }
+
                     assert!(slot.set(file).is_ok());
                 }
                 Err(error) => {

@@ -112,7 +112,7 @@ impl SourceMap {
             sources: boxcar::Vec::new(),
         }
     }
-    
+
     pub fn add_file(&self, path: Utf8PathBuf, text: String) -> &Source {
         let index = self.sources.push_with(move |index| {
             let id = SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"));
