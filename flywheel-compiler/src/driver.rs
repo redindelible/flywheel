@@ -1,14 +1,13 @@
-use std::collections::{HashMap, VecDeque};
-use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use rayon_core::{Scope, ThreadPool, ThreadPoolBuilder};
-
+use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_parser::parse_source;
-use flywheel_ast as ast;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
+use rayon_core::{Scope, ThreadPool, ThreadPoolBuilder};
+
 use crate::object_pool::ObjectPool;
 
 struct Module {
@@ -21,7 +20,7 @@ pub struct Driver {
     interner_state: InternerState,
     interners: ObjectPool<Interner>,
     sources: Arc<SourceMap>,
-    modules: dashmap::DashMap<String, Module>
+    modules: dashmap::DashMap<String, Arc<Module>>,
 }
 
 impl Driver {
@@ -36,7 +35,7 @@ impl Driver {
             runtime,
             interner_state,
             sources,
-            modules: dashmap::DashMap::new()
+            modules: dashmap::DashMap::new(),
         }
     }
 
@@ -47,17 +46,14 @@ impl Driver {
                 Err(Box::new(CompileMessage::error(message)))
             }
             dashmap::Entry::Vacant(entry) => {
-                entry.insert(Module {
-                    path: path.into(),
-                    ast: OnceLock::new(),
-                });
+                entry.insert(Arc::new(Module { path: path.into(), ast: OnceLock::new() }));
                 Ok(())
             }
         }
     }
 
     fn load_module(&self, name: String) -> CompileResult<()> {
-        let module_entry = self.modules.get(&name).unwrap();
+        let module_entry = Arc::clone(&self.modules.get(&name).unwrap());
 
         let module = ModuleLoader::load(&self.runtime, &module_entry.path, &self.sources, &self.interners)?;
         assert!(module_entry.ast.set(module).is_ok());
@@ -65,18 +61,22 @@ impl Driver {
     }
 }
 
-
 struct ModuleLoader<'a> {
     root: &'a Utf8Path,
     sources: &'a SourceMap,
     interners: &'a ObjectPool<Interner>,
 
-    contents: Mutex<HashMap<Vec<Symbol>, Arc<OnceLock<ast::File>>>>,
+    contents: Mutex<HashMap<Vec<Symbol>, oneshot::Receiver<ast::File>>>,
     errors: Mutex<Vec<Box<CompileMessage>>>,
 }
 
 impl ModuleLoader<'_> {
-    fn load(runtime: &ThreadPool, root: &Utf8Path, sources: &SourceMap, interners: &ObjectPool<Interner>) -> CompileResult<ast::Module> {
+    fn load(
+        runtime: &ThreadPool,
+        root: &Utf8Path,
+        sources: &SourceMap,
+        interners: &ObjectPool<Interner>,
+    ) -> CompileResult<ast::Module> {
         let this = ModuleLoader {
             root,
             sources,
@@ -94,7 +94,7 @@ impl ModuleLoader<'_> {
             let loaded = this.contents.into_inner().unwrap();
             let mut contents = HashMap::new();
             for (path_in_module, file) in loaded {
-                contents.insert(path_in_module, Arc::into_inner(file).unwrap().into_inner().unwrap());
+                contents.insert(path_in_module, file.recv().unwrap());
             }
             Ok(ast::Module { contents })
         } else if errors.len() == 1 {
@@ -105,9 +105,13 @@ impl ModuleLoader<'_> {
     }
 
     fn load_file<'a>(&'a self, scope: &Scope<'a>, path_in_module: Vec<Symbol>) {
-        let slot: Arc<OnceLock<ast::File>> = match self.contents.lock().unwrap().entry(path_in_module.clone()) {
+        use std::collections::hash_map::Entry;
+
+        let sender = match self.contents.lock().unwrap().entry(path_in_module.clone()) {
             Entry::Vacant(vacant) => {
-                Arc::clone(vacant.insert(Arc::new(OnceLock::new())))
+                let (sender, receiver) = oneshot::channel();
+                vacant.insert(receiver);
+                sender
             }
             Entry::Occupied(_) => return,
         };
@@ -146,7 +150,7 @@ impl ModuleLoader<'_> {
                         }
                     }
 
-                    assert!(slot.set(file).is_ok());
+                    sender.send(file).unwrap();
                 }
                 Err(error) => {
                     self.errors.lock().unwrap().push(error);
