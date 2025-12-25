@@ -6,21 +6,16 @@ use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
-use rayon_core::{Scope, ThreadPool, ThreadPoolBuilder};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::object_pool::ObjectPool;
-
-struct Module {
-    path: Utf8PathBuf,
-    ast: OnceLock<ast::Module>,
-}
 
 pub struct Driver {
     runtime: ThreadPool,
     interner_state: InternerState,
-    interners: ObjectPool<Interner>,
+    interners: Arc<ObjectPool<Interner>>,
     sources: Arc<SourceMap>,
-    modules: dashmap::DashMap<String, Arc<Module>>,
+    modules: dashmap::DashMap<String, Arc<OnceLock<ast::Module>>>,
 }
 
 impl Driver {
@@ -29,9 +24,10 @@ impl Driver {
         let sources = Arc::new(SourceMap::new());
 
         let interner_state = InternerState::new(Arc::clone(&sources));
+        let interners = Arc::new(ObjectPool::new(runtime.current_num_threads(), || interner_state.interner()));
 
         Driver {
-            interners: ObjectPool::new(runtime.current_num_threads(), || interner_state.interner()),
+            interners,
             runtime,
             interner_state,
             sources,
@@ -39,43 +35,39 @@ impl Driver {
         }
     }
 
-    pub fn register_module(&self, name: String, path: impl Into<Utf8PathBuf>) -> CompileResult<()> {
-        match self.modules.entry(name) {
+    pub fn add_module(&self, name: String, path: Utf8PathBuf) -> CompileResult<()> {
+        let item = match self.modules.entry(name) {
             dashmap::Entry::Occupied(entry) => {
                 let message = format!("there is already a registered module named {}", entry.key());
-                Err(Box::new(CompileMessage::error(message)))
+                return Err(Box::new(CompileMessage::error(message)));
             }
             dashmap::Entry::Vacant(entry) => {
-                entry.insert(Arc::new(Module { path: path.into(), ast: OnceLock::new() }));
-                Ok(())
+                Arc::clone(&entry.insert(Arc::new(OnceLock::new())))
             }
-        }
-    }
+        };
 
-    fn load_module(&self, name: String) -> CompileResult<()> {
-        let module_entry = Arc::clone(&self.modules.get(&name).unwrap());
-
-        let module = ModuleLoader::load(&self.runtime, &module_entry.path, &self.sources, &self.interners)?;
-        assert!(module_entry.ast.set(module).is_ok());
+        let sources = Arc::clone(&self.sources);
+        let interners = Arc::clone(&self.interners);
+        let module = self.runtime.install(move || ModuleLoader::load(path, sources, interners))?;
+        assert!(item.set(module).is_ok());
         Ok(())
     }
 }
 
-struct ModuleLoader<'a> {
-    root: &'a Utf8Path,
-    sources: &'a SourceMap,
-    interners: &'a ObjectPool<Interner>,
+struct ModuleLoader {
+    root: Utf8PathBuf,
+    sources: Arc<SourceMap>,
+    interners: Arc<ObjectPool<Interner>>,
 
     contents: Mutex<HashMap<Vec<Symbol>, oneshot::Receiver<ast::File>>>,
     errors: Mutex<Vec<Box<CompileMessage>>>,
 }
 
-impl ModuleLoader<'_> {
+impl ModuleLoader {
     fn load(
-        runtime: &ThreadPool,
-        root: &Utf8Path,
-        sources: &SourceMap,
-        interners: &ObjectPool<Interner>,
+        root: Utf8PathBuf,
+        sources: Arc<SourceMap>,
+        interners: Arc<ObjectPool<Interner>>,
     ) -> CompileResult<ast::Module> {
         let this = ModuleLoader {
             root,
@@ -85,7 +77,7 @@ impl ModuleLoader<'_> {
             errors: Mutex::new(Vec::new()),
         };
 
-        runtime.in_place_scope(|scope| {
+        rayon::scope(|scope| {
             this.load_file(scope, vec![]);
         });
 
@@ -104,7 +96,7 @@ impl ModuleLoader<'_> {
         }
     }
 
-    fn load_file<'a>(&'a self, scope: &Scope<'a>, path_in_module: Vec<Symbol>) {
+    fn load_file<'a>(&'a self, scope: &rayon::Scope<'a>, path_in_module: Vec<Symbol>) {
         use std::collections::hash_map::Entry;
 
         let sender = match self.contents.lock().unwrap().entry(path_in_module.clone()) {
