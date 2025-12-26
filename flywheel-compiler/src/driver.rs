@@ -26,13 +26,7 @@ impl Driver {
         let interner_state = InternerState::new(Arc::clone(&sources));
         let interners = Arc::new(ObjectPool::new(runtime.current_num_threads(), || interner_state.interner()));
 
-        Driver {
-            interners,
-            runtime,
-            interner_state,
-            sources,
-            modules: dashmap::DashMap::new(),
-        }
+        Driver { interners, runtime, interner_state, sources, modules: dashmap::DashMap::new() }
     }
 
     pub fn add_module(&self, name: String, path: Utf8PathBuf) -> CompileResult<()> {
@@ -41,9 +35,7 @@ impl Driver {
                 let message = format!("there is already a registered module named {}", entry.key());
                 return Err(Box::new(CompileMessage::error(message)));
             }
-            dashmap::Entry::Vacant(entry) => {
-                Arc::clone(&entry.insert(Arc::new(OnceLock::new())))
-            }
+            dashmap::Entry::Vacant(entry) => Arc::clone(&entry.insert(Arc::new(OnceLock::new()))),
         };
 
         let sources = Arc::clone(&self.sources);
@@ -65,12 +57,12 @@ struct ModuleLoader {
 
 impl ModuleLoader {
     fn load(
-        root: Utf8PathBuf,
+        root: impl Into<Utf8PathBuf>,
         sources: Arc<SourceMap>,
         interners: Arc<ObjectPool<Interner>>,
     ) -> CompileResult<ast::Module> {
         let this = ModuleLoader {
-            root,
+            root: root.into(),
             sources,
             interners,
             contents: Mutex::new(HashMap::new()),
@@ -149,5 +141,42 @@ impl ModuleLoader {
                 }
             };
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use flywheel_sources::{InternerState, SourceMap};
+
+    use crate::driver::ModuleLoader;
+    use crate::object_pool::ObjectPool;
+
+    fn check_module_loader(root: &str, mut expected_paths: Vec<&[&str]>) {
+        let sources = Arc::new(SourceMap::new());
+        let interner_state = InternerState::new(Arc::clone(&sources));
+        let interners = Arc::new(ObjectPool::new(16, || interner_state.interner()));
+
+        let module = ModuleLoader::load(root, sources, interners).unwrap();
+        let mut actual_paths: Vec<Vec<String>> = Vec::new();
+        for symbol_path in module.contents.keys() {
+            let resolved_path: Vec<String> =
+                symbol_path.iter().map(|&symbol| interner_state.resolve(symbol).to_string()).collect();
+            actual_paths.push(resolved_path);
+        }
+        actual_paths.sort();
+        expected_paths.sort();
+        assert_eq!(actual_paths, expected_paths);
+    }
+
+    #[test]
+    fn test_load_single_file() {
+        check_module_loader("tests/single_file", vec![&[]]);
+    }
+
+    #[test]
+    fn test_load_one_imported() {
+        check_module_loader("tests/one_imported", vec![&[], &["imported"]]);
     }
 }

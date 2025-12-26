@@ -15,17 +15,14 @@ impl Symbol {
 
 pub struct InternerState {
     deduplicator: Arc<dashmap::DashMap<&'static str, Symbol>>,
-    sources: Arc<SourceMap>
+    sources: Arc<SourceMap>,
 }
 
 impl InternerState {
     pub fn new(sources: Arc<SourceMap>) -> InternerState {
-        InternerState {
-            deduplicator: Arc::new(dashmap::DashMap::new()),
-            sources,
-        }
+        InternerState { deduplicator: Arc::new(dashmap::DashMap::new()), sources }
     }
-    
+
     pub fn interner(&self) -> Interner {
         Interner {
             cache: quick_cache::unsync::Cache::new(1024),
@@ -49,14 +46,14 @@ pub struct Interner {
 }
 
 impl Interner {
-    pub fn new(sources: Arc<SourceMap>) -> Interner {
+    fn new(sources: Arc<SourceMap>) -> Interner {
         Interner {
             cache: quick_cache::unsync::Cache::new(1024),
             deduplicator: Arc::new(dashmap::DashMap::new()),
-            sources
+            sources,
         }
     }
-    
+
     pub fn get_or_intern(&mut self, span: Span) -> Symbol {
         let text: &'static str = unsafe { transmute_lifetime(self.sources.get_span(span)) };
         *self
