@@ -9,6 +9,7 @@ flywheel-sources = { path = "../flywheel-sources" }
 flywheel-error = { path = "../flywheel-error" }
 bumpalo = "3.16.0"
 logos = "0.15.1"
+camino = "1.1.12"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

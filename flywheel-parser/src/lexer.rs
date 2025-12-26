@@ -220,3 +220,164 @@ impl<'a> Lexer<'a> {
         self.source
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flywheel_sources::SourceMap;
+    use crate::token::TokenType;
+    use camino::Utf8PathBuf;
+
+    fn test_lexer(input: &str, expected: &[(TokenType, &str)]) {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", input.to_string());
+        let mut lexer = Lexer::new(source);
+
+        for (expected_ty, expected_text) in expected {
+            let token = lexer.advance();
+            assert_eq!(token.ty, *expected_ty, "Token type mismatch for '{}'", expected_text);
+            assert_eq!(sources.get_span(token.span), *expected_text, "Token text mismatch");
+        }
+
+        let eof_token = lexer.advance();
+        assert_eq!(eof_token.ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn test_keywords() {
+        test_lexer(
+            "fn from struct import let if else while return",
+            &[
+                (TokenType::Fn, "fn"),
+                (TokenType::From, "from"),
+                (TokenType::Struct, "struct"),
+                (TokenType::Import, "import"),
+                (TokenType::Let, "let"),
+                (TokenType::If, "if"),
+                (TokenType::Else, "else"),
+                (TokenType::While, "while"),
+                (TokenType::Return, "return"),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_identifiers() {
+        test_lexer(
+            "foo _bar baz123",
+            &[
+                (TokenType::Identifier, "foo"),
+                (TokenType::Identifier, "_bar"),
+                (TokenType::Identifier, "baz123"),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_numeric_literals() {
+        test_lexer(
+            "123 0b1010 0x123abc 123.456",
+            &[
+                (TokenType::Integer, "123"),
+                (TokenType::Binary, "0b1010"),
+                (TokenType::Hexadecimal, "0x123abc"),
+                (TokenType::Float, "123.456"),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_string_literals() {
+        test_lexer(
+            r#""hello" "with \" escape""#,
+            &[
+                (TokenType::String, r#""hello""#),
+                (TokenType::String, r#""with \" escape""#),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_punctuation() {
+        test_lexer(
+            "-> . , : ; = + - * / % { } ( ) [ ] < >",
+            &[
+                (TokenType::LeftArrow, "->"),
+                (TokenType::Period, "."),
+                (TokenType::Comma, ","),
+                (TokenType::Colon, ":"),
+                (TokenType::Semicolon, ";"),
+                (TokenType::Equal, "="),
+                (TokenType::Plus, "+"),
+                (TokenType::Minus, "-"),
+                (TokenType::Star, "*"),
+                (TokenType::Slash, "/"),
+                (TokenType::Percent, "%"),
+                (TokenType::LeftBrace, "{"),
+                (TokenType::RightBrace, "}"),
+                (TokenType::LeftParenthesis, "("),
+                (TokenType::RightParenthesis, ")"),
+                (TokenType::LeftBracket, "["),
+                (TokenType::RightBracket, "]"),
+                (TokenType::LeftAngle, "<"),
+                (TokenType::RightAngle, ">"),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_whitespace_and_comments() {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", "  # comment\n  let".to_string());
+        let mut lexer = Lexer::new(source);
+
+        let token = lexer.advance();
+        assert_eq!(token.ty, TokenType::Let);
+        assert!(token.has_leading_whitespace);
+
+        let eof_token = lexer.advance();
+        assert_eq!(eof_token.ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn test_no_leading_whitespace() {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", "let".to_string());
+        let mut lexer = Lexer::new(source);
+
+        let token = lexer.advance();
+        assert_eq!(token.ty, TokenType::Let);
+        assert!(!token.has_leading_whitespace);
+    }
+
+    #[test]
+    fn test_multiple_tokens_leading_whitespace() {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", "let a".to_string());
+        let mut lexer = Lexer::new(source);
+
+        let token1 = lexer.advance();
+        assert_eq!(token1.ty, TokenType::Let);
+        assert!(!token1.has_leading_whitespace);
+
+        let token2 = lexer.advance();
+        assert_eq!(token2.ty, TokenType::Identifier);
+        assert!(token2.has_leading_whitespace);
+    }
+
+    #[test]
+    #[ignore = "these should probably be disallowed"]
+    fn test_invalid_tokens() {
+        test_lexer(
+            "0x 0b 123.",
+            &[
+                (TokenType::Error, "0"),
+                (TokenType::Identifier, "x"),
+                (TokenType::Error, "0"),
+                (TokenType::Identifier, "b"),
+                (TokenType::Integer, "123"),
+                (TokenType::Period, "."),
+            ],
+        );
+    }
+}

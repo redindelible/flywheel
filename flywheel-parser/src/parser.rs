@@ -402,7 +402,7 @@ mod test {
     fn ast_test_file(text: &str, expected_ast: &str) {
         let sources = Arc::new(SourceMap::new());
         let mut interner = Interner::new(Arc::clone(&sources));
-        let source = sources.add_file("<test>".into(), text.into());
+        let source = sources.add_file("<test>", text.into());
 
         let file_ast = parse_source(source, &mut interner).unwrap();
         let actual = format!("{:#?}", file_ast.pretty(&sources));
