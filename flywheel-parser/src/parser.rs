@@ -3,12 +3,11 @@ use std::marker::PhantomData;
 
 use bumpalo::Bump;
 use flywheel_ast::{self as ast, File};
-use flywheel_sources::{Interner, Source, Span, Symbol};
 use flywheel_error::{CompileMessage, CompileResult};
+use flywheel_sources::{Interner, Source, Span, Symbol};
 
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
-
 
 pub fn parse_source(source: &Source, interner: &mut Interner) -> CompileResult<File> {
     File::new(|arena| {
@@ -54,7 +53,7 @@ struct Parser<'source, 'ast> {
     interner: &'source mut Interner,
     ast_arena: &'ast Bump,
 
-    possible_tokens: HashSet<TokenType>,  // TODO this could probably be a u64
+    possible_tokens: HashSet<TokenType>, // TODO this could probably be a u64
     error: Option<CompileMessage>,
 }
 
@@ -68,7 +67,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             interner,
             ast_arena,
             possible_tokens: HashSet::new(),
-            error: None
+            error: None,
         };
         this.advance();
         this
@@ -162,10 +161,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             anchor = None;
         }
 
+        self.expect(TokenType::Period)?;
+
         let mut path = Vec::new();
-        while self.curr_is_ty(TokenType::Period) {
-            self.advance();
+        while self.curr_is_ty(TokenType::Identifier) {
             path.push(self.expect_symbol(TokenType::Identifier)?);
+            if self.curr_is_ty(TokenType::Period) {
+                self.advance();
+            } else {
+                break;
+            }
         }
         let path = self.ast_arena.alloc_slice_copy(&path);
 
@@ -233,7 +238,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             }
         }
         self.expect(TokenType::RightBrace)?;
-        let block = ast::Block { stmts: self.ast_arena.alloc_slice_fill_iter(statements), trailing_expr, span: self.span_from(start) };
+        let block = ast::Block {
+            stmts: self.ast_arena.alloc_slice_fill_iter(statements),
+            trailing_expr,
+            span: self.span_from(start),
+        };
         Ok(block)
     }
 
@@ -259,7 +268,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
             if self.curr_is_ty(TokenType::Semicolon) {
                 self.advance();
             }
-            Ok(Some(ast::Stmt::While(self.ast_arena.alloc(ast::While { condition, body, span: self.span_from(start) }))))
+            Ok(Some(ast::Stmt::While(self.ast_arena.alloc(ast::While {
+                condition,
+                body,
+                span: self.span_from(start),
+            }))))
         } else if self.curr_is_ty(TokenType::Return) {
             self.expect(TokenType::Return)?;
             let expr = self.parse_expr()?;
@@ -288,9 +301,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
             self.advance();
             let right = self.parse_expr()?;
-            left = ast::Expr::Binary(self.ast_arena.alloc(
-                ast::Binary { op, left, right, span: self.span_from(start) },
-            ));
+            left =
+                ast::Expr::Binary(self.ast_arena.alloc(ast::Binary { op, left, right, span: self.span_from(start) }));
         }
         Ok(left)
     }
@@ -313,7 +325,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
                 left = ast::Expr::Attr(self.ast_arena.alloc(ast::Attr {
                     object: left,
                     attr,
-                    span: self.span_from(start)
+                    span: self.span_from(start),
                 }));
             } else if self.curr_is_ty(TokenType::LeftParenthesis) {
                 self.advance();
@@ -332,7 +344,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
                 left = ast::Expr::Call(self.ast_arena.alloc(ast::Call {
                     callee: left,
                     arguments,
-                    span: self.span_from(start)
+                    span: self.span_from(start),
                 }));
             } else {
                 break;
@@ -395,8 +407,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
-    use pretty_assertions::assert_str_eq;
+
     use flywheel_sources::{Interner, SourceMap};
+    use pretty_assertions::assert_str_eq;
+
     use crate::parse_source;
 
     fn ast_test_file(text: &str, expected_ast: &str) {
