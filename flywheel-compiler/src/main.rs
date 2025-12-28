@@ -4,7 +4,7 @@ use flywheel_compiler::Driver;
 
 fn main() {
     let driver = Driver::new();
-    // driver.load_module();
+    driver.add_module("<main>", "flywheel-parser/test/simple.fly").unwrap();
     // let source = frontend.block_on(frontend.query_file_source("test/import.fly")).unwrap();
     //
     // let start = Instant::now();

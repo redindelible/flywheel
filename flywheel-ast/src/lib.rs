@@ -2,13 +2,14 @@ mod pretty;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use bumpalo::Bump;
-use flywheel_sources::{Span, Symbol};
+use flywheel_sources::{SourceMap, Span, Symbol};
 
 pub use crate::pretty::Pretty;
 
 pub struct Module {
+    pub sources: Arc<SourceMap>,
     pub contents: HashMap<Vec<Symbol>, File>,
 }
 

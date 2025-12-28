@@ -5,7 +5,7 @@ members = [
     "flywheel-ast",
     "flywheel-common",
     "flywheel-compiler", "flywheel-error",
-    "flywheel-interpreter",
+    "flywheel-interpreter", "flywheel-lower",
     "flywheel-parser",
     "flywheel-sources",
 ]

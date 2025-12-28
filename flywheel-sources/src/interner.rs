@@ -46,7 +46,7 @@ pub struct Interner {
 }
 
 impl Interner {
-    fn new(sources: Arc<SourceMap>) -> Interner {
+    pub fn new(sources: Arc<SourceMap>) -> Interner {
         Interner {
             cache: quick_cache::unsync::Cache::new(1024),
             deduplicator: Arc::new(dashmap::DashMap::new()),

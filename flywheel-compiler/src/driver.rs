@@ -7,7 +7,7 @@ use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
 use rayon::{ThreadPool, ThreadPoolBuilder};
-
+use flywheel_lower::lower;
 use crate::object_pool::ObjectPool;
 
 pub struct Driver {
@@ -15,7 +15,7 @@ pub struct Driver {
     interner_state: InternerState,
     interners: Arc<ObjectPool<Interner>>,
     sources: Arc<SourceMap>,
-    modules: dashmap::DashMap<String, Arc<OnceLock<ast::Module>>>,
+    modules: dashmap::DashMap<String, Arc<OnceLock<()>>>,
 }
 
 impl Driver {
@@ -29,8 +29,8 @@ impl Driver {
         Driver { interners, runtime, interner_state, sources, modules: dashmap::DashMap::new() }
     }
 
-    pub fn add_module(&self, name: String, path: Utf8PathBuf) -> CompileResult<()> {
-        let item = match self.modules.entry(name) {
+    pub fn add_module(&self, name: impl Into<String>, path: impl Into<Utf8PathBuf>) -> CompileResult<()> {
+        let item = match self.modules.entry(name.into()) {
             dashmap::Entry::Occupied(entry) => {
                 let message = format!("there is already a registered module named {}", entry.key());
                 return Err(Box::new(CompileMessage::error(message)));
@@ -40,8 +40,11 @@ impl Driver {
 
         let sources = Arc::clone(&self.sources);
         let interners = Arc::clone(&self.interners);
+        let path = path.into();
         let module = self.runtime.install(move || ModuleLoader::load(path, sources, interners))?;
-        assert!(item.set(module).is_ok());
+        lower(&module)?;
+
+        assert!(item.set(()).is_ok());
         Ok(())
     }
 }
@@ -80,7 +83,7 @@ impl ModuleLoader {
             for (path_in_module, file) in loaded {
                 contents.insert(path_in_module, file.recv().unwrap());
             }
-            Ok(ast::Module { contents })
+            Ok(ast::Module { sources: this.sources, contents })
         } else if errors.len() == 1 {
             Err(errors.pop().unwrap())
         } else {
