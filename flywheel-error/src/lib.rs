@@ -81,7 +81,71 @@ impl Display for CompileErrorWithDisplay<'_> {
         for child in &self.error.children {
             let error = CompileErrorWithDisplay { level: self.level + 1, error: child, sources: self.sources };
             error.fmt(f)?;
-        } 
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use flywheel_sources::SourceMap;
+
+    #[test]
+    fn test_basic_error() {
+        let sources = SourceMap::new();
+        let msg = CompileMessage::error("something went wrong");
+        let output = format!("{}", msg.display(&sources));
+        assert_eq!(output, "Error: something went wrong\n");
+    }
+
+    #[test]
+    fn test_basic_note() {
+        let sources = SourceMap::new();
+        let msg = CompileMessage::note("here is a note");
+        let output = format!("{}", msg.display(&sources));
+        assert_eq!(output, "Note: here is a note\n");
+    }
+
+    #[test]
+    fn test_error_with_span() {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", "let x = 123;".to_string());
+        let span = source.add_span(8..11);
+
+        let msg = CompileMessage::error("invalid number").with_span(span);
+        let output = format!("{}", msg.display(&sources));
+
+        let expected = "Error: invalid number\n    --> test.fly\n  1 | let x = 123;\n              ^^^\n";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_nested_messages() {
+        let sources = SourceMap::new();
+        let source = sources.add_file("test.fly", "fn main() { }".to_string());
+        let span = source.add_span(3..7); // "main"
+
+        let child = CompileMessage::note("defined here").with_span(span);
+        let parent = CompileMessage::error("duplicate function").with_child(child);
+
+        let output = format!("{}", parent.display(&sources));
+
+        let expected = "Error: duplicate function\n |  Note: defined here\n |      --> test.fly\n |    1 | fn main() { }\n |           ^^^^\n";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_multiple_children() {
+        let sources = SourceMap::new();
+        let child1 = CompileMessage::note("note 1");
+        let child2 = CompileMessage::note("note 2");
+        let parent = CompileMessage::error("main error")
+            .with_child(child1)
+            .with_child(child2);
+
+        let output = format!("{}", parent.display(&sources));
+        let expected = "Error: main error\n |  Note: note 1\n |  Note: note 2\n";
+        assert_eq!(output, expected);
     }
 }

@@ -176,7 +176,8 @@ impl SourceMap {
 
     pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
         let span_info = self.spans.resolve(span)?;
-        let source = self.sources.get(span_info.source.0.get() as usize)?;
+        let index = span_info.source.0.get() as usize - 1;
+        let source = self.sources.get(index)?;
         source.get_line(span_info.start..span_info.end)
     }
 }
