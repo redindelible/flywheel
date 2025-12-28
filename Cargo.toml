@@ -1,19 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "exchange",
+#    "exchange",
     "flywheel-ast",
-    "flywheel-common",
-    "flywheel-compiler", "flywheel-error",
-    "flywheel-interpreter", "flywheel-lower",
+#    "flywheel-common",
+    "flywheel-compiler",
+    "flywheel-error",
+#    "flywheel-interpreter",
+    "flywheel-lower",
     "flywheel-parser",
     "flywheel-sources",
 ]
-
-#[profile.release]
-#debug = 1
-
-#[dependencies.regex-automata]
-#default-features = false
-#features = ["std", "perf", "unicode", "syntax", ]
 
