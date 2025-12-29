@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use bumpalo::Bump;
 use flywheel_ast::{self as ast, File};
 use flywheel_error::{CompileMessage, CompileResult};
-use flywheel_sources::{Interner, Source, Span, Symbol};
+use flywheel_sources::{Interner, Source, Span, Symbol, SymbolAndSpan};
 
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
@@ -122,6 +122,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn expect_symbol(&mut self, ty: TokenType) -> ParseResult<Symbol> {
         let token = self.expect(ty)?;
         Ok(self.interner.get_or_intern(token.span))
+    }
+
+    fn expect_symbol_and_span(&mut self, ty: TokenType) -> ParseResult<SymbolAndSpan> {
+        let token = self.expect(ty)?;
+        Ok(self.interner.get_or_intern2(token.span))
     }
 
     // todo move all the allocs to alloc_try_with
@@ -356,10 +361,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_expr_terminal(&mut self) -> ParseResult<ast::Expr<'ast>> {
         let start = self.start();
         if self.curr_is_ty(TokenType::Identifier) {
-            let name = self.expect_symbol(TokenType::Identifier)?;
+            let name = self.expect_symbol_and_span(TokenType::Identifier)?;
             Ok(ast::Expr::Name(name))
         } else if self.curr_is_ty(TokenType::Integer) {
-            let constant = self.expect_symbol(TokenType::Integer)?;
+            let constant = self.expect_symbol_and_span(TokenType::Integer)?;
             Ok(ast::Expr::Integer(constant))
         } else if self.curr_is_ty(TokenType::LeftBrace) {
             let block = self.parse_block()?;
@@ -416,10 +421,11 @@ mod test {
     fn ast_test_file(text: &str, expected_ast: &str) {
         let sources = Arc::new(SourceMap::new());
         let mut interner = Interner::new(Arc::clone(&sources));
-        let source = sources.add_file("<test>", text.into());
+        let source = sources.add_file("<test>", text.replace("\r\n", "\n"));
 
         let file_ast = parse_source(source, &mut interner).unwrap();
         let actual = format!("{:#?}", file_ast.pretty(&sources));
+        let expected_ast = expected_ast.replace("\r\n", "\n");
 
         assert_str_eq!(actual, expected_ast);
     }

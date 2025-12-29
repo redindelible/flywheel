@@ -24,19 +24,19 @@ FileAST {
                         ),
                         span: Span {
                             source: 0,
-                            range: 54..63,
+                            range: 51..60,
                         },
                     },
                 ],
                 trailing_expr: None,
                 span: Span {
                     source: 0,
-                    range: 47..66,
+                    range: 45..62,
                 },
             },
             span: Span {
                 source: 0,
-                range: 30..66,
+                range: 28..62,
             },
         },
     ],

@@ -8,8 +8,21 @@ use crate::span::Span;
 pub struct Symbol(Span);
 
 impl Symbol {
-    pub fn span(self) -> Span {
+    pub(crate) fn span(&self) -> Span {
         self.0
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct SymbolAndSpan(Symbol);
+
+impl SymbolAndSpan {
+    pub fn symbol(&self) -> Symbol {
+        self.0
+    }
+
+    pub fn span(&self) -> Span {
+        self.0.0
     }
 }
 
@@ -63,6 +76,10 @@ impl Interner {
             })
             .unwrap()
             .unwrap()
+    }
+
+    pub fn get_or_intern2(&mut self, span: Span) -> SymbolAndSpan {
+        SymbolAndSpan(self.get_or_intern(span))
     }
 
     pub fn resolve(&self, symbol: Symbol) -> &str {

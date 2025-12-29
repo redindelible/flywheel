@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use camino::{Utf8Path, Utf8PathBuf};
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
+use flywheel_lower::lower;
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use flywheel_lower::lower;
+
 use crate::object_pool::ObjectPool;
 
 pub struct Driver {
@@ -106,7 +107,7 @@ impl ModuleLoader {
         scope.spawn(move |scope| {
             let mut path = self.root.to_owned();
             for segment in &path_in_module {
-                path.push(self.sources.get_span(segment.span()));
+                path.push(self.sources.get_symbol(*segment));
             }
             if path.is_dir() {
                 path.push("main.fly");

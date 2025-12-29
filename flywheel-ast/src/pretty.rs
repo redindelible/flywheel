@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Formatter};
+
 use flywheel_sources::SourceMap;
+
 use crate::*;
 
 impl File {
@@ -21,13 +23,14 @@ impl<'a, T> Pretty<'a, T> {
 
 impl<'a> Debug for Pretty<'a, &'a File> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FileAST")
-            .field("top_levels", &self.child(&self.inner.top_levels))
-            .finish()
+        f.debug_struct("FileAST").field("top_levels", &self.child(&self.inner.top_levels)).finish()
     }
 }
 
-impl<'a, T> Debug for Pretty<'a, &'a &'a [T]> where Pretty<'a, &'a T>: Debug {
+impl<'a, T> Debug for Pretty<'a, &'a &'a [T]>
+where
+    Pretty<'a, &'a T>: Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_list();
         for item in *self.inner {
@@ -37,12 +40,13 @@ impl<'a, T> Debug for Pretty<'a, &'a &'a [T]> where Pretty<'a, &'a T>: Debug {
     }
 }
 
-impl<'a, T> Debug for Pretty<'a, &'a Option<T>> where Pretty<'a, &'a T>: Debug {
+impl<'a, T> Debug for Pretty<'a, &'a Option<T>>
+where
+    Pretty<'a, &'a T>: Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.inner {
-            Some(item) => f.debug_tuple("Some")
-                .field(&self.child(item))
-                .finish(),
+            Some(item) => f.debug_tuple("Some").field(&self.child(item)).finish(),
             None => f.write_str("None"),
         }
     }
@@ -50,7 +54,13 @@ impl<'a, T> Debug for Pretty<'a, &'a Option<T>> where Pretty<'a, &'a T>: Debug {
 
 impl<'a> Debug for Pretty<'a, &'a Symbol> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.sources.get_span(self.inner.span()))
+        f.write_str(self.sources.get_symbol(*self.inner))
+    }
+}
+
+impl<'a> Debug for Pretty<'a, &'a SymbolAndSpan> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.sources.get_symbol(self.inner.symbol()))
     }
 }
 
@@ -64,7 +74,6 @@ impl<'a> Debug for Pretty<'a, &'a Span> {
     }
 }
 
-
 impl<'a> Debug for Pretty<'a, &'a UnaryOp> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.inner {
@@ -73,7 +82,6 @@ impl<'a> Debug for Pretty<'a, &'a UnaryOp> {
         }
     }
 }
-
 
 impl<'a> Debug for Pretty<'a, &'a BinaryOp> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -86,7 +94,6 @@ impl<'a> Debug for Pretty<'a, &'a BinaryOp> {
         }
     }
 }
-
 
 macro_rules! ast_pretty {
     (enum $name:ident { $($variant:ident $(=> $variant_name:ident)?),* $(,)? } ) => {
@@ -111,23 +118,22 @@ macro_rules! ast_pretty {
     }
 }
 
-
 macro_rules! ast_enum_pretty_impl {
     ($self:expr, $fmt:expr, $item:expr,) => {
         Debug::fmt(&$self.child(*$item), $fmt)
     };
     ($self:expr, $fmt:expr, $item:expr, $variant_name:ident) => {
-        $fmt.debug_tuple(stringify!($variant_name))
-            .field(&$self.child($item))
-            .finish()
+        $fmt.debug_tuple(stringify!($variant_name)).field(&$self.child($item)).finish()
     };
 }
 
-ast_pretty!(enum TopLevel {
-    Function,
-    Struct,
-    Import,
-});
+ast_pretty!(
+    enum TopLevel {
+        Function,
+        Struct,
+        Import,
+    }
+);
 
 ast_pretty!(struct Function {
     name,
@@ -214,13 +220,14 @@ ast_pretty!(struct Block {
     span,
 });
 
-ast_pretty!(enum Stmt {
-    Let,
-    While,
-    Return,
-    Expr,
-});
-
+ast_pretty!(
+    enum Stmt {
+        Let,
+        While,
+        Return,
+        Expr,
+    }
+);
 
 ast_pretty!(struct Let {
     name,

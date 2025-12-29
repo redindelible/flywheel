@@ -3,8 +3,9 @@ mod pretty;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
+
 use bumpalo::Bump;
-use flywheel_sources::{SourceMap, Span, Symbol};
+use flywheel_sources::{SourceMap, Span, Symbol, SymbolAndSpan};
 
 pub use crate::pretty::Pretty;
 
@@ -101,11 +102,11 @@ pub struct Return<'ast> {
 }
 
 pub enum Expr<'ast> {
-    Bool(Symbol),
-    Integer(Symbol),
-    Float(Symbol),
-    String(Symbol),
-    Name(Symbol),
+    Bool(SymbolAndSpan),
+    Integer(SymbolAndSpan),
+    Float(SymbolAndSpan),
+    String(SymbolAndSpan),
+    Name(SymbolAndSpan),
     Block(&'ast Block<'ast>),
     Attr(&'ast Attr<'ast>),
     Index(&'ast Index<'ast>),

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::{SourceMap, Span, Symbol};
@@ -22,7 +23,7 @@ impl<'ast> Item<'ast> {
 
 struct Namespace<'ast> {
     sources: Arc<SourceMap>,
-    items: HashMap<Symbol, Item<'ast>>
+    items: HashMap<Symbol, Item<'ast>>,
 }
 
 impl<'ast> Namespace<'ast> {
@@ -32,21 +33,18 @@ impl<'ast> Namespace<'ast> {
         match self.items.entry(name) {
             Entry::Vacant(vacant) => {
                 vacant.insert(item);
-            },
+            }
             Entry::Occupied(occupied) => {
-                let name = self.sources.get_span(name.span());
+                let name = self.sources.get_symbol(name);
                 let message = CompileMessage::error(format!("There's already a thing called {}", name))
                     .with_span(item.span())
-                    .with_child(CompileMessage::note("Previously declared here")
-                        .with_span(occupied.get().span())
-                    );
+                    .with_child(CompileMessage::note("Previously declared here").with_span(occupied.get().span()));
                 return Err(Box::new(message));
             }
         }
         Ok(())
     }
 }
-
 
 pub fn lower(ast: &ast::Module) -> CompileResult<()> {
     let mut file_namespaces: HashMap<&[Symbol], Namespace> = HashMap::new();

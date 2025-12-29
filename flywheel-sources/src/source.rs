@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use camino::Utf8PathBuf;
 use memchr::memchr_iter;
 
+use crate::Symbol;
 use crate::span::{Span, SpanInfo, SpanMap};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
@@ -36,14 +37,12 @@ impl Source {
         &self.text
     }
 
-    pub fn name(&self) -> &str { &self.name }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
     pub fn add_span(&self, range: Range<usize>) -> Span {
-        self.spans.add(SpanInfo {
-            source: self.id,
-            start: range.start,
-            end: range.end
-        })
+        self.spans.add(SpanInfo { source: self.id, start: range.start, end: range.end })
     }
 
     /// Gets information about the surrounding line of the provided range.
@@ -107,16 +106,15 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub fn new() -> SourceMap {
-        SourceMap {
-            spans: Arc::new(SpanMap::new()),
-            sources: boxcar::Vec::new(),
-        }
+        SourceMap { spans: Arc::new(SpanMap::new()), sources: boxcar::Vec::new() }
     }
 
     pub fn add_file(&self, path: impl Into<Utf8PathBuf>, text: String) -> &Source {
         let path = path.into();
         let index = self.sources.push_with(move |index| {
-            let id = SourceId(NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"));
+            let id = SourceId(
+                NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"),
+            );
             Source {
                 id,
                 spans: Arc::clone(&self.spans),
@@ -149,6 +147,10 @@ impl SourceMap {
 
     pub fn get_span(&self, span: Span) -> &str {
         self.try_get_span(span).expect("The provided Span is invalid for this SourceMap")
+    }
+
+    pub fn get_symbol(&self, symbol: Symbol) -> &str {
+        self.try_get_span(symbol.span()).expect("The provided Span is invalid for this SourceMap")
     }
 
     pub fn get_span_line(&self, span: Span) -> LineInfo<'_> {
