@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -34,6 +35,20 @@ pub struct InternerState {
 impl InternerState {
     pub fn new(sources: Arc<SourceMap>) -> InternerState {
         InternerState { deduplicator: Arc::new(dashmap::DashMap::new()), sources }
+    }
+
+    pub fn add_builtins(&self, builtins: &[&'static str]) -> HashMap<&'static str, Symbol> {
+        let source = self.sources.add_builtins(builtins.iter().copied().collect());
+        let mut builtin_map = HashMap::new();
+        let mut offset = 0;
+        for &builtin in builtins {
+            let symbol = self
+                .deduplicator
+                .entry(builtin)
+                .or_insert_with(|| Symbol(source.add_span(offset..offset + builtin.len())));
+            builtin_map.insert(builtin, *symbol);
+        }
+        builtin_map
     }
 
     pub fn interner(&self) -> Interner {

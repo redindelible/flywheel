@@ -34,7 +34,6 @@ impl TryFrom<u64> for u48 {
     }
 }
 
-#[derive(Copy)]
 #[repr(align(8))]
 pub struct Span(SpanInner);
 
@@ -47,7 +46,7 @@ impl Span {
     fn from_raw(value: u64) -> Self {
         unsafe { std::mem::transmute(value) }
     }
-    
+
     fn raw(&self) -> u64 {
         unsafe { std::mem::transmute_copy(self) }
     }
@@ -59,13 +58,15 @@ impl Clone for Span {
     }
 }
 
+impl Copy for Span {}
+
 impl PartialEq for Span {
     fn eq(&self, other: &Self) -> bool {
         self.raw() == other.raw()
     }
 }
 
-impl Eq for Span { }
+impl Eq for Span {}
 
 impl Hash for Span {
     fn hash<H: Hasher>(&self, state: &mut H) {

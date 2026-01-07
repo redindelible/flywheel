@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use camino::{Utf8Path, Utf8PathBuf};
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
-use flywheel_lower::lower;
+use flywheel_lower::{BUILTINS, lower};
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -16,6 +16,7 @@ pub struct Driver {
     interner_state: InternerState,
     interners: Arc<ObjectPool<Interner>>,
     sources: Arc<SourceMap>,
+    builtins: HashMap<&'static str, Symbol>,
     modules: dashmap::DashMap<String, Arc<OnceLock<()>>>,
 }
 
@@ -25,9 +26,10 @@ impl Driver {
         let sources = Arc::new(SourceMap::new());
 
         let interner_state = InternerState::new(Arc::clone(&sources));
+        let builtins = interner_state.add_builtins(BUILTINS);
         let interners = Arc::new(ObjectPool::new(runtime.current_num_threads(), || interner_state.interner()));
 
-        Driver { interners, runtime, interner_state, sources, modules: dashmap::DashMap::new() }
+        Driver { interners, runtime, interner_state, sources, builtins, modules: dashmap::DashMap::new() }
     }
 
     pub fn add_module(&self, name: impl Into<String>, path: impl Into<Utf8PathBuf>) -> CompileResult<()> {
@@ -43,7 +45,7 @@ impl Driver {
         let interners = Arc::clone(&self.interners);
         let path = path.into();
         let module = self.runtime.install(move || ModuleLoader::load(path, sources, interners))?;
-        lower(&module)?;
+        lower(&module, &self.builtins)?;
 
         assert!(item.set(()).is_ok());
         Ok(())

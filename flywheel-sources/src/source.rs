@@ -109,6 +109,23 @@ impl SourceMap {
         SourceMap { spans: Arc::new(SpanMap::new()), sources: boxcar::Vec::new() }
     }
 
+    pub fn add_builtins(&self, text: String) -> &Source {
+        let index = self.sources.push_with(move |index| {
+            let id = SourceId(
+                NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"),
+            );
+            Source {
+                id,
+                spans: Arc::clone(&self.spans),
+                text,
+                name: "<builtins>".into(),
+                _absolute_path: None,
+                line_offsets: OnceLock::new(),
+            }
+        });
+        self.sources.get(index).unwrap()
+    }
+
     pub fn add_file(&self, path: impl Into<Utf8PathBuf>, text: String) -> &Source {
         let path = path.into();
         let index = self.sources.push_with(move |index| {
