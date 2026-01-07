@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 
 use flywheel_sources::{LineInfo, SourceMap, Span};
 
-pub type CompileResult<T> = Result<T, Box<CompileMessage>>;
+pub type CompileResult<T> = Result<T, CompileMessage>;
 
 #[derive(Debug)]
 pub enum Level {
@@ -33,7 +33,10 @@ impl<T: Display> Debug for UseDisplay<T> {
 }
 
 #[derive(Debug)]
-pub struct CompileMessage {
+pub struct CompileMessage(Box<Inner>);
+
+#[derive(Debug)]
+struct Inner {
     level: Level,
     message: String,
     span: Option<Span>,
@@ -42,44 +45,42 @@ pub struct CompileMessage {
 }
 
 impl CompileMessage {
-    pub fn note(message: impl Into<String>) -> Self {
-        CompileMessage {
-            level: Level::Note,
-            message: message.into(),
-            span: None,
-            children: vec![],
-            backtrace: UseDisplay(Backtrace::capture()),
-        }
+    pub fn note(message: impl Into<String>) -> CompileMessage {
+        CompileMessage::new(Level::Note, message.into())
     }
 
-    pub fn error(message: impl Into<String>) -> Self {
-        CompileMessage {
-            level: Level::Error,
-            message: message.into(),
+    pub fn error(message: impl Into<String>) -> CompileMessage {
+        CompileMessage::new(Level::Error, message.into())
+    }
+
+    fn new(level: Level, message: String) -> CompileMessage {
+        CompileMessage(Box::new(Inner {
+            level,
+            message,
             span: None,
             children: vec![],
             backtrace: UseDisplay(Backtrace::capture()),
-        }
+        }))
     }
 
     pub fn with_span(mut self, span: Span) -> Self {
-        self.span = Some(span);
+        self.0.span = Some(span);
         self
     }
 
     pub fn with_child(mut self, child: CompileMessage) -> Self {
-        self.children.push(child);
+        self.0.children.push(child);
         self
     }
 
     pub fn display<'a>(&'a self, sources: &'a SourceMap) -> CompileErrorWithDisplay<'a> {
-        CompileErrorWithDisplay { level: 0, error: self, sources }
+        CompileErrorWithDisplay { level: 0, error: &self.0, sources }
     }
 }
 
 pub struct CompileErrorWithDisplay<'a> {
     level: usize,
-    error: &'a CompileMessage,
+    error: &'a Inner,
     sources: &'a SourceMap,
 }
 
@@ -102,7 +103,7 @@ impl Display for CompileErrorWithDisplay<'_> {
             )?;
         }
         for child in &self.error.children {
-            let error = CompileErrorWithDisplay { level: self.level + 1, error: child, sources: self.sources };
+            let error = CompileErrorWithDisplay { level: self.level + 1, error: &child.0, sources: self.sources };
             error.fmt(f)?;
         }
         Ok(())

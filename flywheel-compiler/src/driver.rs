@@ -36,7 +36,7 @@ impl Driver {
         let item = match self.modules.entry(name.into()) {
             dashmap::Entry::Occupied(entry) => {
                 let message = format!("there is already a registered module named {}", entry.key());
-                return Err(Box::new(CompileMessage::error(message)));
+                return Err(CompileMessage::error(message));
             }
             dashmap::Entry::Vacant(entry) => Arc::clone(&entry.insert(Arc::new(OnceLock::new()))),
         };
@@ -58,7 +58,7 @@ struct ModuleLoader {
     interners: Arc<ObjectPool<Interner>>,
 
     contents: Mutex<HashMap<Vec<Symbol>, oneshot::Receiver<ast::File>>>,
-    errors: Mutex<Vec<Box<CompileMessage>>>,
+    errors: Mutex<Vec<CompileMessage>>,
 }
 
 impl ModuleLoader {
@@ -124,7 +124,7 @@ impl ModuleLoader {
                 }
                 Err(_) => {
                     let message = format!("could not read from {}", &path);
-                    Err(Box::new(CompileMessage::error(message)))
+                    Err(CompileMessage::error(message))
                 }
             };
 

@@ -52,7 +52,7 @@ impl<'ast, 'ns> Namespace<'ast, 'ns> {
                     .with_child(
                         CompileMessage::note("Previously declared here").with_span(occupied.get().span().unwrap()),
                     );
-                return Err(Box::new(message));
+                return Err(message);
             }
         }
         Ok(())

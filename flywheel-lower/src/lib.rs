@@ -23,11 +23,11 @@ fn resolve_name_as_type<'ast, 'ns>(
     match namespace.resolve(name) {
         None => {
             let message = format!("No type found called {}", namespace.resolve_symbol(name));
-            Err(Box::new(CompileMessage::error(message)))
+            Err(CompileMessage::error(message))
         }
         Some(Item::Function(_)) => {
             let message = format!("No type found called {}", namespace.resolve_symbol(name));
-            Err(Box::new(CompileMessage::error(message)))
+            Err(CompileMessage::error(message))
         }
         Some(Item::Imported(import)) => {
             assert!(import.anchor.is_none());

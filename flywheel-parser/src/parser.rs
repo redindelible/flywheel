@@ -14,7 +14,7 @@ pub fn parse_source(source: &Source, interner: &mut Interner) -> CompileResult<F
         let lexer = Lexer::new(source);
         let mut parser = Parser::new(lexer, interner, arena);
 
-        parser.parse_file().map_err(|_| Box::new(parser.error.unwrap()))
+        parser.parse_file().map_err(|_| parser.error.unwrap())
     })
 }
 
