@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use flywheel_ast as ast;
+use flywheel_common::{declare_key_type, KeyData, ReservableMap};
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::{SourceMap, Span, Symbol};
 
@@ -27,21 +28,42 @@ impl<'ast> Item<'ast> {
     }
 }
 
-pub struct Namespace<'ast, 'ns> {
+declare_key_type! {
+    pub struct NamespaceId;
+}
+
+pub struct NamespaceMap<'ast> {
     sources: Arc<SourceMap>,
-    parent: Option<&'ns Namespace<'ast, 'ns>>,
+    map: ReservableMap<NamespaceId, Namespace<'ast>>
+}
+
+struct Namespace<'ast> {
+    sources: Arc<SourceMap>,
+    parent: Option<NamespaceId>,
     items: HashMap<Symbol, Item<'ast>>,
 }
 
-impl<'ast, 'ns> Namespace<'ast, 'ns> {
-    pub fn new(sources: Arc<SourceMap>, parent: Option<&'ns Namespace<'ast, 'ns>>) -> Self {
-        Namespace { sources, parent, items: HashMap::new() }
+impl<'ast> NamespaceMap<'ast> {
+    pub fn new(sources: Arc<SourceMap>) -> NamespaceMap<'ast> {
+        NamespaceMap {
+            sources,
+            map: ReservableMap::new(),
+        }
     }
 
-    pub fn add(&mut self, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
+    pub fn add_namespace(&mut self, parent: Option<NamespaceId>) -> NamespaceId {
+        self.map.add(Namespace {
+            sources: Arc::clone(&self.sources),
+            parent,
+            items: HashMap::new(),
+        })
+    }
+
+
+    pub fn add(&mut self, id: NamespaceId, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
         use std::collections::hash_map::Entry;
 
-        match self.items.entry(name) {
+        match self.map[id].items.entry(name) {
             Entry::Vacant(vacant) => {
                 vacant.insert(item);
             }
@@ -58,14 +80,14 @@ impl<'ast, 'ns> Namespace<'ast, 'ns> {
         Ok(())
     }
 
-    pub fn resolve(&self, name: Symbol) -> Option<&Item<'ast>> {
-        let mut search_in = self;
+    pub fn resolve(&self, id: NamespaceId, name: Symbol) -> Option<&Item<'ast>> {
+        let mut search_in: &Namespace = &self.map[id];
         loop {
             // dbg!(search_in.items.keys().map(|&sym| self.resolve_symbol(sym)).collect::<Vec<_>>());
             if let Some(item) = search_in.items.get(&name) {
                 return Some(item);
-            } else if let Some(parent) = &search_in.parent {
-                search_in = parent;
+            } else if let Some(parent) = search_in.parent {
+                search_in = &self.map[parent];
             } else {
                 return None;
             }
