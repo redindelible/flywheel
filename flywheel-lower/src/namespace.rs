@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use flywheel_ast as ast;
-use flywheel_common::{declare_key_type, KeyData, ReservableMap};
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::{SourceMap, Span, Symbol};
 
@@ -28,47 +27,39 @@ impl<'ast> Item<'ast> {
     }
 }
 
-declare_key_type! {
-    pub struct NamespaceId;
-}
-
-pub struct NamespaceMap<'ast> {
+pub struct Namespace<'ast> {
     sources: Arc<SourceMap>,
-    map: ReservableMap<NamespaceId, Namespace<'ast>>
-}
-
-struct Namespace<'ast> {
-    sources: Arc<SourceMap>,
-    parent: Option<NamespaceId>,
+    parent: Option<Arc<Namespace<'ast>>>,
     items: HashMap<Symbol, Item<'ast>>,
 }
 
-impl<'ast> NamespaceMap<'ast> {
-    pub fn new(sources: Arc<SourceMap>) -> NamespaceMap<'ast> {
-        NamespaceMap {
+impl<'ast> Namespace<'ast> {
+    pub fn new_root(sources: Arc<SourceMap>) -> Namespace<'ast> {
+        Namespace {
             sources,
-            map: ReservableMap::new(),
+            parent: None,
+            items: HashMap::new(),
         }
     }
 
-    pub fn add_namespace(&mut self, parent: Option<NamespaceId>) -> NamespaceId {
-        self.map.add(Namespace {
-            sources: Arc::clone(&self.sources),
-            parent,
+    pub fn new_child(parent: Arc<Namespace<'ast>>) -> Namespace<'ast> {
+        Namespace {
+            sources: Arc::clone(&parent.sources),
+            parent: Some(parent),
             items: HashMap::new(),
-        })
+        }
     }
 
-
-    pub fn add(&mut self, id: NamespaceId, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
+    pub fn add(&mut self, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
         use std::collections::hash_map::Entry;
 
-        match self.map[id].items.entry(name) {
+        match self.items.entry(name) {
             Entry::Vacant(vacant) => {
                 vacant.insert(item);
             }
             Entry::Occupied(occupied) => {
                 let name = self.sources.get_symbol(name);
+                // todo can we just have error take a callback that expects a source instead
                 let message = CompileMessage::error(format!("There's already a thing called {}", name))
                     .with_span(item.span().unwrap())
                     .with_child(
@@ -80,21 +71,21 @@ impl<'ast> NamespaceMap<'ast> {
         Ok(())
     }
 
-    pub fn resolve(&self, id: NamespaceId, name: Symbol) -> Option<&Item<'ast>> {
-        let mut search_in: &Namespace = &self.map[id];
+    pub fn resolve(&self, name: Symbol) -> Option<&Item<'ast>> {
+        let mut search_in: &Namespace = self;
         loop {
             // dbg!(search_in.items.keys().map(|&sym| self.resolve_symbol(sym)).collect::<Vec<_>>());
             if let Some(item) = search_in.items.get(&name) {
                 return Some(item);
-            } else if let Some(parent) = search_in.parent {
-                search_in = &self.map[parent];
+            } else if let Some(parent) = &search_in.parent {
+                search_in = parent;
             } else {
                 return None;
             }
         }
     }
 
-    pub fn resolve_symbol(&self, name: Symbol) -> &str {
+    pub fn get_symbol(&self, name: Symbol) -> &str {
         self.sources.get_symbol(name)
     }
 }
