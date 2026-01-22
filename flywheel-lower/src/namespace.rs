@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
-use flywheel_sources::{SourceMap, Span, Symbol};
+use flywheel_sources::{Span, Symbol};
 
 pub enum Builtin {
     U32,
@@ -28,15 +28,13 @@ impl<'ast> Item<'ast> {
 }
 
 pub struct Namespace<'ast> {
-    sources: Arc<SourceMap>,
     parent: Option<Arc<Namespace<'ast>>>,
     items: HashMap<Symbol, Item<'ast>>,
 }
 
 impl<'ast> Namespace<'ast> {
-    pub fn new_root(sources: Arc<SourceMap>) -> Namespace<'ast> {
+    pub fn new_root() -> Namespace<'ast> {
         Namespace {
-            sources,
             parent: None,
             items: HashMap::new(),
         }
@@ -44,7 +42,6 @@ impl<'ast> Namespace<'ast> {
 
     pub fn new_child(parent: Arc<Namespace<'ast>>) -> Namespace<'ast> {
         Namespace {
-            sources: Arc::clone(&parent.sources),
             parent: Some(parent),
             items: HashMap::new(),
         }
@@ -58,9 +55,8 @@ impl<'ast> Namespace<'ast> {
                 vacant.insert(item);
             }
             Entry::Occupied(occupied) => {
-                let name = self.sources.get_symbol(name);
                 // todo can we just have error take a callback that expects a source instead
-                let message = CompileMessage::error(format!("There's already a thing called {}", name))
+                let message = CompileMessage::error_dyn(move |s| format!("There's already a thing called {}", s.get_symbol(name)))
                     .with_span(item.span().unwrap())
                     .with_child(
                         CompileMessage::note("Previously declared here").with_span(occupied.get().span().unwrap()),
@@ -83,9 +79,5 @@ impl<'ast> Namespace<'ast> {
                 return None;
             }
         }
-    }
-
-    pub fn get_symbol(&self, name: Symbol) -> &str {
-        self.sources.get_symbol(name)
     }
 }

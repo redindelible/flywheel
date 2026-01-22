@@ -1,4 +1,5 @@
 use std::backtrace::Backtrace;
+use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
 
 use flywheel_sources::{LineInfo, SourceMap, Span};
@@ -24,42 +25,50 @@ impl Display for Level {
     }
 }
 
-struct UseDisplay<T>(T);
+enum Message {
+    Static(String),
+    Dynamic(Box<dyn for<'a> Fn(&'a SourceMap) -> String + Send + Sync>),
+}
 
-impl<T: Display> Debug for UseDisplay<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+impl Message {
+    fn get_text<'a>(&'a self, sources: &'a SourceMap) -> Cow<'a, str> {
+        match self {
+            Message::Static(text) => Cow::Borrowed(text),
+            Message::Dynamic(closure) => Cow::Owned(closure(sources)),
+        }
     }
 }
 
-#[derive(Debug)]
 pub struct CompileMessage(Box<Inner>);
 
-#[derive(Debug)]
 struct Inner {
     level: Level,
-    message: String,
+    message: Message,
     span: Option<Span>,
     children: Vec<CompileMessage>,
-    backtrace: UseDisplay<Backtrace>,
+    backtrace: Backtrace,
 }
 
 impl CompileMessage {
     pub fn note(message: impl Into<String>) -> CompileMessage {
-        CompileMessage::new(Level::Note, message.into())
+        CompileMessage::new(Level::Note, Message::Static(message.into()))
     }
 
     pub fn error(message: impl Into<String>) -> CompileMessage {
-        CompileMessage::new(Level::Error, message.into())
+        CompileMessage::new(Level::Error, Message::Static(message.into()))
     }
 
-    fn new(level: Level, message: String) -> CompileMessage {
+    pub fn error_dyn(message: impl 'static + for<'a> Fn(&'a SourceMap) -> String + Send + Sync) -> CompileMessage {
+        CompileMessage::new(Level::Error, Message::Dynamic(Box::new(message)))
+    }
+
+    fn new(level: Level, message: Message) -> CompileMessage {
         CompileMessage(Box::new(Inner {
             level,
             message,
             span: None,
             children: vec![],
-            backtrace: UseDisplay(Backtrace::capture()),
+            backtrace: Backtrace::capture(),
         }))
     }
 
@@ -78,6 +87,17 @@ impl CompileMessage {
     }
 }
 
+impl Debug for CompileMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompilerMessage")
+            .field("level", &self.0.level)
+            .field("span", &self.0.span)
+            .field("children", &self.0.children)
+            .field("backtrace", &self.0.backtrace)
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct CompileErrorWithDisplay<'a> {
     level: usize,
     error: &'a Inner,
@@ -87,7 +107,8 @@ pub struct CompileErrorWithDisplay<'a> {
 impl Display for CompileErrorWithDisplay<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let indent = " |  ".repeat(self.level);
-        writeln!(f, "{}{}: {}", &indent, self.error.level, self.error.message)?;
+        let message = &*self.error.message.get_text(self.sources);
+        writeln!(f, "{}{}: {}", &indent, self.error.level, message)?;
         if let Some(span) = self.error.span {
             let LineInfo { source, text, line_index, span_start, span_end } = self.sources.get_span_line(span);
             let line_number = format!("{: >3}", line_index + 1);

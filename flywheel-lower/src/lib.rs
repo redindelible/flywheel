@@ -28,7 +28,6 @@ mod context {
     pub struct LoweringContext<'ast, S> {
         _state: PhantomData<S>,
 
-        sources: Arc<SourceMap>,
         ast: &'ast ast::Module,
         builtins: &'ast HashMap<&'static str, Symbol>,
 
@@ -41,7 +40,6 @@ mod context {
             LoweringContext {
                 _state: PhantomData,
 
-                sources: Arc::clone(&ast.sources),
                 ast,
                 builtins,
 
@@ -56,10 +54,6 @@ mod context {
 
         pub fn builtins(&self) -> &'ast HashMap<&'static str, Symbol> {
             self.builtins
-        }
-
-        pub fn get_symbol(&self, symbol: Symbol) -> &str {
-            self.sources.get_symbol(symbol)
         }
 
         pub fn with_collected_names(mut self, collected_names: CollectedNames<'ast>) -> LoweringContext<'ast, WithCollectedNames> {
@@ -111,12 +105,10 @@ impl<'ast> LoweringContext<'ast, WithCollectedNames> {
     fn resolve_name_as_type(&self, in_ns: &Namespace<'ast>, name: Symbol) -> CompileResult<Type<'ast>> {
         match in_ns.resolve(name) {
             None => {
-                let message = format!("No type found called {}", self.get_symbol(name));
-                Err(CompileMessage::error(message))
+                Err(CompileMessage::error_dyn(move |s| format!("No type found called {}", s.get_symbol(name))))
             }
             Some(Item::Function(_)) => {
-                let message = format!("No type found called {}", self.get_symbol(name));
-                Err(CompileMessage::error(message))
+                Err(CompileMessage::error_dyn(move |s| format!("No type found called {}", s.get_symbol(name))))
             }
             Some(Item::Imported(import)) => {
                 assert!(import.anchor.is_none());
@@ -141,7 +133,7 @@ pub const BUILTINS: &[&str] = &["u32"];
 pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> CompileResult<()> {
     let ctx = LoweringContext::new(ast, builtins);
 
-    let mut prelude_ns = Namespace::new_root(Arc::clone(&ast.sources));
+    let mut prelude_ns = Namespace::new_root();
     prelude_ns.add(builtins["u32"], Item::Builtin(Builtin::U32)).unwrap();
     let prelude_ns = Arc::new(prelude_ns);
 
