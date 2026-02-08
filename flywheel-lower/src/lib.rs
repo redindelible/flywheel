@@ -8,7 +8,7 @@ use by_address::ByAddress;
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::Symbol;
-use crate::context::{CollectedNames, CollectedNamesData, LoweringContext, StructFieldsData};
+use crate::context::{CollectedNames, CollectedNamesData, LoweringContext, StructFields, StructFieldsData};
 use crate::namespace::{Builtin, Item, Namespace};
 
 enum Type<'ast> {
@@ -45,15 +45,13 @@ impl<'ast> LoweringContext<'ast, CollectedNames> {
 
 pub const BUILTINS: &[&str] = &["u32"];
 
-pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> CompileResult<()> {
-    let ctx = LoweringContext::new(ast, builtins);
-
+fn collect_names<'ast>(ctx: LoweringContext<'ast, ()>) -> CompileResult<LoweringContext<'ast, CollectedNames>> {
     let mut prelude_ns = Namespace::new_root();
-    prelude_ns.add(builtins["u32"], Item::Builtin(Builtin::U32)).unwrap();
+    prelude_ns.add(ctx.builtins()["u32"], Item::Builtin(Builtin::U32)).unwrap();
     let prelude_ns = Arc::new(prelude_ns);
 
     let mut file_namespaces: HashMap<&[Symbol], Arc<Namespace>> = HashMap::new();
-    for (path_in_module, file) in &ast.contents {
+    for (path_in_module, file) in &ctx.ast().contents {
         let mut file_ns = Namespace::new_child(Arc::clone(&prelude_ns));
 
         for top_level in file.top_levels() {
@@ -72,13 +70,15 @@ pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> Com
         file_namespaces.insert(path_in_module, Arc::new(file_ns));
     }
 
-    let ctx = ctx.add_collected_names(CollectedNamesData {
+    Ok(ctx.add_collected_names(CollectedNamesData {
         file_namespaces,
         prelude_ns,
-    });
+    }))
+}
 
+fn collect_struct_fields<'ast>(ctx: LoweringContext<'ast, CollectedNames>) -> CompileResult<LoweringContext<'ast, StructFields>> {
     let mut struct_fields = HashMap::new();
-    for (path_in_module, file) in &ast.contents {
+    for (path_in_module, file) in &ctx.ast().contents {
         let file_namespace = &*ctx.collected_names().file_namespaces[path_in_module.as_slice()];
         for top_level in file.top_levels() {
             match *top_level {
@@ -97,9 +97,15 @@ pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> Com
         }
     }
 
-    let ctx = ctx.add_struct_fields(StructFieldsData {
+    Ok(ctx.add_struct_fields(StructFieldsData {
         struct_fields
-    });
+    }))
+}
+
+pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> CompileResult<()> {
+    let ctx = LoweringContext::new(ast, builtins);
+    let ctx = collect_names(ctx)?;
+    let ctx = collect_struct_fields(ctx);
 
     Ok(())
 }
