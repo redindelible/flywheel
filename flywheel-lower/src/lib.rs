@@ -1,4 +1,5 @@
 mod namespace;
+mod context;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use by_address::ByAddress;
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::Symbol;
-use crate::context::{LoweringContext, WithCollectedNames};
+use crate::context::{CollectedNames, CollectedNamesData, LoweringContext, StructFieldsData};
 use crate::namespace::{Builtin, Item, Namespace};
 
 enum Type<'ast> {
@@ -15,93 +16,7 @@ enum Type<'ast> {
     Struct(&'ast ast::Struct<'ast>),
 }
 
-mod context {
-    use std::collections::HashMap;
-    use std::marker::PhantomData;
-    use std::ops::Deref;
-    use std::sync::Arc;
-    use flywheel_sources::{SourceMap, Symbol};
-    use flywheel_ast as ast;
-    use crate::{CollectedNames, StructFields, Type};
-
-    #[repr(C)]
-    pub struct LoweringContext<'ast, S> {
-        _state: PhantomData<S>,
-
-        ast: &'ast ast::Module,
-        builtins: &'ast HashMap<&'static str, Symbol>,
-
-        collected_names: Option<CollectedNames<'ast>>,
-        struct_fields: Option<StructFields<'ast>>,
-    }
-
-    impl<'ast> LoweringContext<'ast, ()> {
-        pub fn new(ast: &'ast ast::Module, builtins: &'ast HashMap<&'static str, Symbol>) -> LoweringContext<'ast, ()> {
-            LoweringContext {
-                _state: PhantomData,
-
-                ast,
-                builtins,
-
-                collected_names: None,
-                struct_fields: None,
-            }
-        }
-
-        pub fn ast(&self) -> &'ast ast::Module {
-            self.ast
-        }
-
-        pub fn builtins(&self) -> &'ast HashMap<&'static str, Symbol> {
-            self.builtins
-        }
-
-        pub fn with_collected_names(mut self, collected_names: CollectedNames<'ast>) -> LoweringContext<'ast, WithCollectedNames> {
-            self.collected_names = Some(collected_names);
-            unsafe { std::mem::transmute(self) }
-        }
-    }
-
-    pub struct WithCollectedNames;
-
-    impl<'ast> Deref for LoweringContext<'ast, WithCollectedNames> {
-        type Target = LoweringContext<'ast, ()>;
-
-        fn deref(&self) -> &Self::Target {
-            unsafe { std::mem::transmute::<&Self, &Self::Target>(self) }
-        }
-    }
-
-    impl<'ast> LoweringContext<'ast, WithCollectedNames> {
-        pub fn collected_names(&self) -> &CollectedNames<'ast> {
-            unsafe { self.collected_names.as_ref().unwrap_unchecked() }
-        }
-
-        pub fn with_struct_fields(mut self, struct_fields: StructFields<'ast>) -> LoweringContext<'ast, WithStructFields> {
-            self.struct_fields = Some(struct_fields);
-            unsafe { std::mem::transmute(self) }
-        }
-    }
-
-    pub struct WithStructFields;
-
-    impl<'ast> LoweringContext<'ast, WithStructFields> {
-        pub fn struct_fields(&self) -> &StructFields<'ast> {
-            unsafe { self.struct_fields.as_ref().unwrap_unchecked() }
-        }
-    }
-}
-
-pub struct CollectedNames<'ast> {
-    pub file_namespaces: HashMap<&'ast [Symbol], Arc<Namespace<'ast>>>,
-    pub prelude_ns: Arc<Namespace<'ast>>,
-}
-
-pub struct StructFields<'ast> {
-    struct_fields: HashMap<ByAddress<&'ast ast::Struct<'ast>>, HashMap<Symbol, Type<'ast>>>
-}
-
-impl<'ast> LoweringContext<'ast, WithCollectedNames> {
+impl<'ast> LoweringContext<'ast, CollectedNames> {
     fn resolve_name_as_type(&self, in_ns: &Namespace<'ast>, name: Symbol) -> CompileResult<Type<'ast>> {
         match in_ns.resolve(name) {
             None => {
@@ -157,7 +72,7 @@ pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> Com
         file_namespaces.insert(path_in_module, Arc::new(file_ns));
     }
 
-    let ctx = ctx.with_collected_names(CollectedNames {
+    let ctx = ctx.add_collected_names(CollectedNamesData {
         file_namespaces,
         prelude_ns,
     });
@@ -182,7 +97,7 @@ pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> Com
         }
     }
 
-    let ctx = ctx.with_struct_fields(StructFields {
+    let ctx = ctx.add_struct_fields(StructFieldsData {
         struct_fields
     });
 

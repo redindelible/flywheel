@@ -8,4 +8,5 @@ flywheel-ast = { path = "../flywheel-ast" }
 flywheel-error = { path = "../flywheel-error" }
 flywheel-sources = { path = "../flywheel-sources" }
 flywheel-common = { path = "../flywheel-common" }
+paste = "1.0.15"
 by_address = "1.2.1"
