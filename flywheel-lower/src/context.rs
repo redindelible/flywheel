@@ -2,14 +2,13 @@ use std::collections::HashMap;
 use flywheel_ast as ast;
 use flywheel_sources::{SourceMap, Symbol};
 use std::sync::Arc;
-use paste::paste;
 use by_address::ByAddress;
 use crate::namespace::{Builtin, Item, Namespace};
 use crate::Type;
 
 macro_rules! lowering_context {
     { $vis:vis struct $name:ident<$li:lifetime> { $($default_field:ident: $default_field_ty:ty,)* $([$stage:ident] $($field:ident: $field_ty:ty,)*)* } } => {
-        paste! {
+        ::paste::paste! {
             #[repr(transparent)] $vis struct $name<$li, S>([<$name Data>]<$li>, ::std::marker::PhantomData<S>);
 
             struct [<$name Data>]<$li> {
@@ -48,7 +47,7 @@ macro_rules! lowering_stage_rec {
 
 macro_rules! lowering_stage {
     ($vis:vis $name:ident $li:lifetime $prev:ty [$stage:ty] $($field:ident: $field_ty:ty,)*) => {
-        paste! {
+        ::paste::paste! {
         $vis struct $stage;
 
         $vis struct [<$stage Data>] <$li> {
@@ -78,6 +77,25 @@ macro_rules! lowering_stage {
     };
 }
 
+
+pub struct AstMap<'ast, N, V>(HashMap<ByAddress<&'ast N>, V>);
+
+impl<'ast, N, V> AstMap<'ast, N, V> {
+    pub fn new() -> Self {
+        AstMap(HashMap::new())
+    }
+
+    pub fn insert(&mut self, node: &'ast N, value: V) {
+        assert!(self.0.insert(ByAddress(node), value).is_none());
+    }
+}
+
+
+pub struct FunctionSignature<'ast> {
+    pub return_type: Type<'ast>
+}
+
+
 lowering_context! {
     pub struct LoweringContext<'ast> {
         ast: &'ast ast::Module,
@@ -87,7 +105,10 @@ lowering_context! {
         file_namespaces: HashMap<&'ast [Symbol], Arc<Namespace<'ast>>>,
         prelude_ns: Arc<Namespace<'ast>>,
 
-        [StructFields]
-        struct_fields: HashMap<ByAddress<&'ast ast::Struct<'ast>>, HashMap<Symbol, Type<'ast>>>,
+        [AllStructFields]
+        all_struct_fields: AstMap<'ast, ast::Struct<'ast>, HashMap<Symbol, Type<'ast>>>,
+
+        [AllFunctionSignatures]
+        signatures: AstMap<'ast, ast::Function<'ast>, FunctionSignature<'ast>>,
     }
 }
