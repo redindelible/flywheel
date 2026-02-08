@@ -1,5 +1,7 @@
 use std::ops::Range;
+
 use flywheel_sources::{Source, Span};
+
 use crate::token::{Token, TokenType};
 
 #[derive(Debug)]
@@ -128,7 +130,7 @@ fn advance_logos(lexer: &mut Option<logos::Lexer<'_, LogosToken>>) -> Option<(To
                 Ok(Whitespace | Comment) => {
                     has_leading_whitespace = true;
                     continue;
-                },
+                }
                 Err(()) => TokenType::Error,
                 Ok(Fn) => TokenType::Fn,
                 Ok(From) => TokenType::From,
@@ -184,32 +186,22 @@ pub(super) struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a Source) -> Lexer<'a> {
         let text = source.text();
-        let eof = source.add_span(text.len()..text.len()+1);
-        Lexer {
-            source,
-            eof,
-            inner: Some(logos::Lexer::new(text)),
-        }
+        let eof = source.add_span(text.len()..text.len() + 1);
+        Lexer { source, eof, inner: Some(logos::Lexer::new(text)) }
     }
 
     pub fn advance(&mut self) -> Token {
         let token = match advance_logos(&mut self.inner) {
-            Some((ty, has_leading_whitespace, span)) => Token {
-                ty,
-                has_leading_whitespace,
-                span: self.source.add_span(span),
-            },
+            Some((ty, has_leading_whitespace, span)) => {
+                Token { ty, has_leading_whitespace, span: self.source.add_span(span) }
+            }
             None => self.eof(),
         };
         token
     }
 
     pub fn eof(&self) -> Token {
-        Token {
-            ty: TokenType::Eof,
-            has_leading_whitespace: false,
-            span: self.eof,
-        }
+        Token { ty: TokenType::Eof, has_leading_whitespace: false, span: self.eof }
     }
 
     pub fn span(&self) -> Range<usize> {
@@ -223,10 +215,10 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use flywheel_sources::SourceMap;
+
+    use super::*;
     use crate::token::TokenType;
-    use camino::Utf8PathBuf;
 
     fn test_lexer(input: &str, expected: &[(TokenType, &str)]) {
         let sources = SourceMap::new();
@@ -265,11 +257,7 @@ mod tests {
     fn test_identifiers() {
         test_lexer(
             "foo _bar baz123",
-            &[
-                (TokenType::Identifier, "foo"),
-                (TokenType::Identifier, "_bar"),
-                (TokenType::Identifier, "baz123"),
-            ],
+            &[(TokenType::Identifier, "foo"), (TokenType::Identifier, "_bar"), (TokenType::Identifier, "baz123")],
         );
     }
 
@@ -290,10 +278,7 @@ mod tests {
     fn test_string_literals() {
         test_lexer(
             r#""hello" "with \" escape""#,
-            &[
-                (TokenType::String, r#""hello""#),
-                (TokenType::String, r#""with \" escape""#),
-            ],
+            &[(TokenType::String, r#""hello""#), (TokenType::String, r#""with \" escape""#)],
         );
     }
 

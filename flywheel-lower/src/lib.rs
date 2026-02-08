@@ -1,14 +1,17 @@
-mod namespace;
 mod context;
+mod namespace;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use by_address::ByAddress;
 use flywheel_ast as ast;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::Symbol;
-use crate::context::{AllFunctionSignatures, AllFunctionSignaturesData, AllStructFields, AllStructFieldsData, AstMap, CollectedNames, CollectedNamesData, FunctionSignature, LoweringContext};
+
+use crate::context::{
+    AllFunctionSignatures, AllFunctionSignaturesData, AllStructFields, AllStructFieldsData, AstMap, CollectedNames,
+    CollectedNamesData, FunctionSignature, LoweringContext,
+};
 use crate::namespace::{Builtin, Item, Namespace};
 
 enum Type<'ast> {
@@ -19,9 +22,7 @@ enum Type<'ast> {
 impl<'ast> LoweringContext<'ast, CollectedNames> {
     fn resolve_name_as_type(&self, in_ns: &Namespace<'ast>, name: Symbol) -> CompileResult<Type<'ast>> {
         match in_ns.resolve(name) {
-            None => {
-                Err(CompileMessage::error_dyn(move |s| format!("No type found called {}", s.get_symbol(name))))
-            }
+            None => Err(CompileMessage::error_dyn(move |s| format!("No type found called {}", s.get_symbol(name)))),
             Some(Item::Function(_)) => {
                 Err(CompileMessage::error_dyn(move |s| format!("No type found called {}", s.get_symbol(name))))
             }
@@ -34,11 +35,7 @@ impl<'ast> LoweringContext<'ast, CollectedNames> {
         }
     }
 
-    fn resolve_type(
-        &self,
-        in_ns: &Namespace<'ast>,
-        ast_ty: &ast::Type<'ast>,
-    ) -> CompileResult<Type<'ast>> {
+    fn resolve_type(&self, in_ns: &Namespace<'ast>, ast_ty: &ast::Type<'ast>) -> CompileResult<Type<'ast>> {
         self.resolve_name_as_type(in_ns, ast_ty.name)
     }
 }
@@ -70,10 +67,7 @@ fn collect_names(ctx: LoweringContext<()>) -> CompileResult<LoweringContext<Coll
         file_namespaces.insert(path_in_module, Arc::new(file_ns));
     }
 
-    Ok(ctx.add_collected_names(CollectedNamesData {
-        file_namespaces,
-        prelude_ns,
-    }))
+    Ok(ctx.add_collected_names(CollectedNamesData { file_namespaces, prelude_ns }))
 }
 
 fn collect_struct_fields(ctx: LoweringContext<CollectedNames>) -> CompileResult<LoweringContext<AllStructFields>> {
@@ -97,12 +91,12 @@ fn collect_struct_fields(ctx: LoweringContext<CollectedNames>) -> CompileResult<
         }
     }
 
-    Ok(ctx.add_all_struct_fields(AllStructFieldsData {
-        all_struct_fields
-    }))
+    Ok(ctx.add_all_struct_fields(AllStructFieldsData { all_struct_fields }))
 }
 
-fn collect_function_signatures(ctx: LoweringContext<AllStructFields>) -> CompileResult<LoweringContext<AllFunctionSignatures>> {
+fn collect_function_signatures(
+    ctx: LoweringContext<AllStructFields>,
+) -> CompileResult<LoweringContext<AllFunctionSignatures>> {
     let mut signatures = AstMap::new();
     for (path_in_module, file) in &ctx.ast().contents {
         let file_namespace = &*ctx.collected_names().file_namespaces[path_in_module.as_slice()];
@@ -110,18 +104,14 @@ fn collect_function_signatures(ctx: LoweringContext<AllStructFields>) -> Compile
             match *top_level {
                 ast::TopLevel::Function(func_) => {
                     let return_type = ctx.resolve_type(file_namespace, &func_.return_type)?;
-                    signatures.insert(func_, FunctionSignature {
-                        return_type
-                    });
+                    signatures.insert(func_, FunctionSignature { return_type });
                 }
                 _ => (),
             };
         }
     }
 
-    Ok(ctx.add_all_function_signatures(AllFunctionSignaturesData {
-        signatures
-    }))
+    Ok(ctx.add_all_function_signatures(AllFunctionSignaturesData { signatures }))
 }
 
 pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> CompileResult<()> {
@@ -129,6 +119,8 @@ pub fn lower(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> Com
     let ctx = collect_names(ctx)?;
     let ctx = collect_struct_fields(ctx)?;
     let ctx = collect_function_signatures(ctx)?;
+
+    let _ = ctx;
 
     Ok(())
 }

@@ -34,17 +34,11 @@ pub struct Namespace<'ast> {
 
 impl<'ast> Namespace<'ast> {
     pub fn new_root() -> Namespace<'ast> {
-        Namespace {
-            parent: None,
-            items: HashMap::new(),
-        }
+        Namespace { parent: None, items: HashMap::new() }
     }
 
     pub fn new_child(parent: Arc<Namespace<'ast>>) -> Namespace<'ast> {
-        Namespace {
-            parent: Some(parent),
-            items: HashMap::new(),
-        }
+        Namespace { parent: Some(parent), items: HashMap::new() }
     }
 
     pub fn add(&mut self, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
@@ -56,11 +50,11 @@ impl<'ast> Namespace<'ast> {
             }
             Entry::Occupied(occupied) => {
                 // todo can we just have error take a callback that expects a source instead
-                let message = CompileMessage::error_dyn(move |s| format!("There's already a thing called {}", s.get_symbol(name)))
-                    .with_span(item.span().unwrap())
-                    .with_child(
-                        CompileMessage::note("Previously declared here").with_span(occupied.get().span().unwrap()),
-                    );
+                let message = CompileMessage::error_dyn(move |s| {
+                    format!("There's already a thing called {}", s.get_symbol(name))
+                })
+                .with_span(item.span().unwrap())
+                .with_child(CompileMessage::note("Previously declared here").with_span(occupied.get().span().unwrap()));
                 return Err(message);
             }
         }

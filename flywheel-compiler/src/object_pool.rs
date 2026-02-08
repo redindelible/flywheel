@@ -1,4 +1,4 @@
-use crossbeam_channel::{Sender, Receiver};
+use crossbeam_channel::{Receiver, Sender};
 
 pub struct ObjectPool<T> {
     sender: Sender<T>,
@@ -11,10 +11,7 @@ impl<T> ObjectPool<T> {
         for _ in 0..count {
             sender.send(builder()).unwrap();
         }
-        ObjectPool {
-            sender,
-            receiver,
-        }
+        ObjectPool { sender, receiver }
     }
 
     pub fn with<O>(&self, f: impl FnOnce(&mut T) -> O) -> O {

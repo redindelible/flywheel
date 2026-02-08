@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use flywheel_ast as ast;
-use flywheel_sources::{SourceMap, Symbol};
 use std::sync::Arc;
+
 use by_address::ByAddress;
-use crate::namespace::{Builtin, Item, Namespace};
+use flywheel_ast as ast;
+use flywheel_sources::Symbol;
+
 use crate::Type;
+use crate::namespace::Namespace;
 
 macro_rules! lowering_context {
     { $vis:vis struct $name:ident<$li:lifetime> { $($default_field:ident: $default_field_ty:ty,)* $([$stage:ident] $($field:ident: $field_ty:ty,)*)* } } => {
@@ -77,7 +79,6 @@ macro_rules! lowering_stage {
     };
 }
 
-
 pub struct AstMap<'ast, N, V>(HashMap<ByAddress<&'ast N>, V>);
 
 impl<'ast, N, V> AstMap<'ast, N, V> {
@@ -90,11 +91,9 @@ impl<'ast, N, V> AstMap<'ast, N, V> {
     }
 }
 
-
 pub struct FunctionSignature<'ast> {
-    pub return_type: Type<'ast>
+    pub return_type: Type<'ast>,
 }
-
 
 lowering_context! {
     pub struct LoweringContext<'ast> {
