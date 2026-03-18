@@ -1,8 +1,9 @@
 use std::fmt::{Debug, Formatter};
 
-use flywheel_sources::SourceMap;
+use flywheel_sources::{SourceMap, Span, Symbol, SymbolAndSpan};
 
-use crate::*;
+use crate::ast::*;
+
 
 impl File {
     pub fn pretty<'a>(&'a self, sources: &'a SourceMap) -> Pretty<'a, &'a File> {
