@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::ops::Index;
 use std::sync::Arc;
 
 use by_address::ByAddress;
 use flywheel_ast as ast;
+use flywheel_exchange as ex;
 use flywheel_sources::Symbol;
 
 use crate::Type;
@@ -91,18 +93,33 @@ impl<'ast, N, V> AstMap<'ast, N, V> {
     }
 }
 
+impl<'ast, N, V> Index<&'ast N> for AstMap<'ast, N, V> {
+    type Output = V;
+
+    fn index(&self, index: &'ast N) -> &V {
+        &self.0[&ByAddress(index)]
+    }
+}
+
 pub struct FunctionSignature<'ast> {
     pub return_type: Type<'ast>,
+    pub id: ex::FunctionId,
+}
+
+pub struct Builtins {
+    pub kw_true: Symbol,
+    pub kw_false: Symbol,
+    pub kw_u32: Symbol,
 }
 
 lowering_context! {
     pub struct LoweringContext<'ast> {
         ast: &'ast ast::Module,
-        builtins: &'ast HashMap<&'static str, Symbol>,
+        builtins: Builtins,
 
         [CollectedNames]
-        file_namespaces: HashMap<&'ast [Symbol], Arc<Namespace<'ast>>>,
-        prelude_ns: Arc<Namespace<'ast>>,
+        prelude_ns: Namespace<'ast>,
+        file_namespaces: HashMap<&'ast [Symbol], Namespace<'ast>>,
 
         [AllStructFields]
         all_struct_fields: AstMap<'ast, ast::Struct<'ast>, HashMap<Symbol, Type<'ast>>>,

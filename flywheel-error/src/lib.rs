@@ -89,11 +89,11 @@ impl CompileMessage {
 
 impl Debug for CompileMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CompilerMessage")
+        f.debug_struct("CompileMessage")
             .field("level", &self.0.level)
             .field("span", &self.0.span)
             .field("children", &self.0.children)
-            .field("backtrace", &self.0.backtrace)
+            .field("backtrace", &format_args!("\n{}", self.0.backtrace))
             .finish_non_exhaustive()
     }
 }

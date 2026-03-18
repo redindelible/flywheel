@@ -9,8 +9,8 @@ use enum_map::{EnumMap, enum_map};
 use logos::{Lexer, Logos};
 use strum::VariantArray;
 
-use crate::interchange::{Function, Global, Instruction, InstructionKind, Terminator, TerminatorKind, TupleType, Type};
-use crate::{Block, BlockID};
+use crate::interchange::{Function, Instruction, InstructionKind, Terminator, TerminatorKind, TupleType, Type};
+use crate::{Block, BlockId};
 
 #[derive(Logos, PartialEq, Eq, Copy, Clone, Hash, Debug)]
 #[logos(skip r"[ \t\r\n]+")]
@@ -74,20 +74,23 @@ pub enum ParseError<'s> {
 
 static INSTRUCTION_NAMES: LazyLock<EnumMap<InstructionKind, &'static str>> = LazyLock::new(|| {
     enum_map! {
-            InstructionKind::LoadConst => "load.const",
-            InstructionKind::LoadLocal => "load.local",
-            InstructionKind::StoreLocal => "store.local",
-            InstructionKind::LoadUnit => "load.unit",
-            InstructionKind::LoadInteger => "load.int",
-            InstructionKind::LoadFloat => "load.float",
-            InstructionKind::Upcast => "cast.up",
-            InstructionKind::Call => "call",
-            InstructionKind::LessEqual => "le",
-            InstructionKind::Equal => "eq",
-            InstructionKind::Add => "add",
-            InstructionKind::Mul => "mul",
-            InstructionKind::Div => "div",
-            InstructionKind::Mod => "mod",
+        InstructionKind::Pop => "pop",
+        InstructionKind::LoadConst => "load.const",
+        InstructionKind::LoadLocal => "load.local",
+        InstructionKind::StoreLocal => "store.local",
+        InstructionKind::LoadUnit => "load.unit",
+        InstructionKind::LoadTrue => "load.true",
+        InstructionKind::LoadFalse => "load.false",
+        InstructionKind::LoadInteger => "load.int",
+        InstructionKind::LoadFloat => "load.float",
+        InstructionKind::Upcast => "cast.up",
+        InstructionKind::Call => "call",
+        InstructionKind::LessEqual => "le",
+        InstructionKind::Equal => "eq",
+        InstructionKind::Add => "add",
+        InstructionKind::Mul => "mul",
+        InstructionKind::Div => "div",
+        InstructionKind::Mod => "mod",
     }
 });
 
@@ -111,7 +114,7 @@ struct ModuleParser<'s> {
 }
 
 struct BlockInfo {
-    id: BlockID,
+    id: BlockId,
     is_defined: bool,
 }
 
@@ -170,7 +173,7 @@ impl<'s> ModuleParser<'s> {
         Ok(index)
     }
 
-    fn label_reference(&mut self, label_name: &'s str, is_definition: bool) -> ParseResult<'s, BlockID> {
+    fn label_reference(&mut self, label_name: &'s str, is_definition: bool) -> ParseResult<'s, BlockId> {
         let labels_count = self.blocks.len();
         let label_info = match self.blocks.entry(label_name) {
             Entry::Occupied(occupied) => occupied.into_mut(),
@@ -178,7 +181,7 @@ impl<'s> ModuleParser<'s> {
                 let Ok(id) = u32::try_from(labels_count) else {
                     return Err(ParseError::TooManyLabels { slice: label_name });
                 };
-                vacant.insert(BlockInfo { id: BlockID(id), is_defined: false })
+                vacant.insert(BlockInfo { id: BlockId(id), is_defined: false })
             }
         };
         if is_definition {

@@ -28,17 +28,12 @@ impl<'ast> Item<'ast> {
 }
 
 pub struct Namespace<'ast> {
-    parent: Option<Arc<Namespace<'ast>>>,
     items: HashMap<Symbol, Item<'ast>>,
 }
 
 impl<'ast> Namespace<'ast> {
-    pub fn new_root() -> Namespace<'ast> {
-        Namespace { parent: None, items: HashMap::new() }
-    }
-
-    pub fn new_child(parent: Arc<Namespace<'ast>>) -> Namespace<'ast> {
-        Namespace { parent: Some(parent), items: HashMap::new() }
+    pub fn new() -> Namespace<'ast> {
+        Namespace { items: HashMap::new() }
     }
 
     pub fn add(&mut self, name: Symbol, item: Item<'ast>) -> CompileResult<()> {
@@ -49,7 +44,6 @@ impl<'ast> Namespace<'ast> {
                 vacant.insert(item);
             }
             Entry::Occupied(occupied) => {
-                // todo can we just have error take a callback that expects a source instead
                 let message = CompileMessage::error_dyn(move |s| {
                     format!("There's already a thing called {}", s.get_symbol(name))
                 })
@@ -61,17 +55,33 @@ impl<'ast> Namespace<'ast> {
         Ok(())
     }
 
-    pub fn resolve(&self, name: Symbol) -> Option<&Item<'ast>> {
-        let mut search_in: &Namespace = self;
-        loop {
-            // dbg!(search_in.items.keys().map(|&sym| self.resolve_symbol(sym)).collect::<Vec<_>>());
-            if let Some(item) = search_in.items.get(&name) {
-                return Some(item);
-            } else if let Some(parent) = &search_in.parent {
-                search_in = parent;
-            } else {
-                return None;
-            }
-        }
+    fn resolve(&self, name: Symbol) -> Option<&Item<'ast>> {
+        self.items.get(&name)
+    }
+}
+
+
+pub struct SearchPath<'a, 'ast>(Vec<&'a [Namespace<'ast>]>);
+
+impl<'a, 'ast> From<&'a Namespace<'ast>> for SearchPath<'a, 'ast> {
+    fn from(value: &'a Namespace<'ast>) -> SearchPath<'a, 'ast> {
+        SearchPath(vec![std::slice::from_ref(value)])
+    }
+}
+
+impl<'a, 'ast> From<&'a [Namespace<'ast>]> for SearchPath<'a, 'ast> {
+    fn from(value: &'a [Namespace<'ast>]) -> SearchPath<'a, 'ast> {
+        SearchPath(vec![value])
+    }
+}
+
+impl<'a, 'ast> SearchPath<'a, 'ast> {
+    pub fn then(mut self, ns: &'a Namespace<'ast>) -> SearchPath<'a, 'ast> {
+        self.0.push(std::slice::from_ref(ns));
+        self
+    }
+
+    pub fn resolve(&self, name: Symbol) -> Option<&'a Item<'ast>> {
+        self.0.iter().copied().flatten().find_map(|ns| ns.resolve(name))
     }
 }

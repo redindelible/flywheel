@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use flywheel_ast as ast;
-use flywheel_error::{CompileMessage, CompileResult};
-use flywheel_lower::{BUILTINS, lower};
+use flywheel_error::{CompileErrorWithDisplay, CompileMessage, CompileResult};
+use flywheel_lower::{BUILTINS, lower_module};
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -45,10 +45,14 @@ impl Driver {
         let interners = Arc::clone(&self.interners);
         let path = path.into();
         let module = self.runtime.install(move || ModuleLoader::load(path, sources, interners))?;
-        lower(&module, &self.builtins)?;
+        let ex_module = lower_module(&module, &self.builtins)?;
 
         assert!(item.set(()).is_ok());
         Ok(())
+    }
+
+    pub fn display_message(&self, message: &CompileMessage) {
+        eprintln!("{}", message.display(&self.sources));
     }
 }
 

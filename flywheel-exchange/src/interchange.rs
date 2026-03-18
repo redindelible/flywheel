@@ -5,14 +5,12 @@ use enum_map::Enum;
 use strum::{EnumDiscriminants, VariantArray};
 use triomphe::ThinArc;
 
-#[derive(Debug)]
-pub struct Module {
-    pub globals: Vec<Global>,
-}
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct FunctionId(pub u32);
 
 #[derive(Debug)]
-pub enum Global {
-    Function(Function),
+pub struct Module {
+    pub functions: HashMap<FunctionId, Function>,
 }
 
 #[derive(Debug)]
@@ -20,16 +18,15 @@ pub struct Function {
     pub name: ArcStr,
     pub parameters: Vec<Type>,
     pub return_type: Type,
-    pub blocks: HashMap<BlockID, Block>,
+    pub blocks: HashMap<BlockId, Block>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct BlockID(pub u32);
+pub struct BlockId(pub u32);
 
 #[derive(Debug)]
 pub struct Block {
     pub retained_locals: Vec<Type>,
-    pub new_locals: Vec<Type>,
     pub instructions: Vec<Instruction>,
     pub terminator: Terminator,
 }
@@ -38,10 +35,13 @@ pub struct Block {
 #[strum_discriminants(name(InstructionKind))]
 #[strum_discriminants(derive(Enum, VariantArray))]
 pub enum Instruction {
+    Pop,
     LoadConst { name: ArcStr },
     LoadLocal { index: u32 },
     StoreLocal { index: u32 },
     LoadUnit,
+    LoadTrue,
+    LoadFalse,
     LoadInteger(i64),
     LoadFloat(f64),
     Upcast { to_ty: Type },
@@ -58,24 +58,25 @@ pub enum Instruction {
 #[strum_discriminants(name(TerminatorKind))]
 #[strum_discriminants(derive(Enum, VariantArray))]
 pub enum Terminator {
-    Jump { target: BlockID },
-    Loop { target: BlockID },
-    IfElse { true_target: BlockID, false_target: BlockID },
+    Jump { target: BlockId },
+    Loop { target: BlockId },
+    IfElse { true_target: BlockId, false_target: BlockId },
     Return,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Type {
     Unit,
+    Bool,
     Integer,
     Float,
-    Generic { slot: u32 },
+    Generic { context: u32, slot: u32 },
     Name(ArcStr),
     Tuple(TupleType),
     Function(FunctionType),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TupleType(ThinArc<(), Type>);
 
 impl TupleType {
@@ -98,7 +99,7 @@ impl From<TupleType> for Type {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FunctionType(ThinArc<Type, Type>);
 
 impl FunctionType {
