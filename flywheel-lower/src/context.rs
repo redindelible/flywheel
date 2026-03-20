@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::ops::Index;
-use std::sync::Arc;
 
 use by_address::ByAddress;
 use flywheel_ast as ast;
 use flywheel_exchange as ex;
 use flywheel_sources::Symbol;
 
-use crate::Type;
+use crate::types::Type;
 use crate::namespace::Namespace;
 
 macro_rules! lowering_context {
