@@ -9,13 +9,7 @@ use crate::Symbol;
 use crate::span::{Span, SpanInfo, SpanMap};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
-pub struct SourceId(pub(crate) NonZero<u32>);  // todo we don't need the niche
-
-impl SourceId {
-    pub fn num(&self) -> u64 {
-        self.0.get() as u64 - 1  // todo create a dummy element and avoid the need for - 1, or no dummy element if no longer NonZero
-    }
-}
+pub struct SourceId(pub(crate) NonZero<u32>);
 
 pub struct Source {
     id: SourceId,
@@ -106,13 +100,22 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub fn new() -> SourceMap {
-        SourceMap { spans: Arc::new(SpanMap::new()), sources: boxcar::Vec::new() }
+        let spans = Arc::new(SpanMap::new());
+        let dummy_source = Source {
+            id: SourceId(NonZero::<u32>::MAX),
+            spans: Arc::clone(&spans),
+            _absolute_path: None,
+            text: "".into(),
+            name: "<dummy>".into(),
+            line_offsets: OnceLock::new(),
+        };
+        SourceMap { spans, sources: boxcar::Vec::from_iter([dummy_source]) }
     }
 
     pub fn add_builtins(&self, text: String) -> &Source {
         let index = self.sources.push_with(move |index| {
             let id = SourceId(
-                NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"),
+                NonZero::new(index as u32).expect("The number of source files is limited to u32::MAX - 1"),
             );
             Source {
                 id,
@@ -130,7 +133,7 @@ impl SourceMap {
         let path = path.into();
         let index = self.sources.push_with(move |index| {
             let id = SourceId(
-                NonZero::new(index as u32 + 1).expect("The number of source files is limited to u32::MAX - 1"),
+                NonZero::new(index as u32).expect("The number of source files is limited to u32::MAX - 1"),
             );
             Source {
                 id,
@@ -146,7 +149,7 @@ impl SourceMap {
 
     pub fn get_source(&self, source_id: SourceId) -> &Source {
         self.sources
-            .get(source_id.0.get() as usize - 1)
+            .get(source_id.0.get() as usize)
             .expect("The provided SourceId did not refer to a Source in this SourceMap")
     }
 
@@ -155,7 +158,7 @@ impl SourceMap {
     /// # Safety
     /// `source_id` must have been created by this SourceMap.
     pub unsafe fn get_source_unchecked(&self, source_id: SourceId) -> &Source {
-        unsafe { self.sources.get_unchecked(source_id.0.get() as usize - 1) }
+        unsafe { self.sources.get_unchecked(source_id.0.get() as usize) }
     }
 
     pub fn get_span_info(&self, span: Span) -> SpanInfo {
@@ -176,7 +179,7 @@ impl SourceMap {
 
     pub unsafe fn get_span_unchecked(&self, span: Span) -> &str {
         let span_info = unsafe { self.spans.resolve_unchecked(span) };
-        let index = span_info.source.0.get() as usize - 1;
+        let index = span_info.source.0.get() as usize;
         let source = unsafe { self.sources.get_unchecked(index) };
         unsafe { source.text.get_unchecked(span_info.start..span_info.end) }
     }
@@ -188,14 +191,14 @@ impl SourceMap {
     /// from is safe but yields unspecified results.
     pub fn try_get_span(&self, span: Span) -> Option<&str> {
         let span_info = self.spans.resolve(span)?;
-        let index = span_info.source.0.get() as usize - 1;
+        let index = span_info.source.0.get() as usize;
         let source = self.sources.get(index)?;
         source.text.get(span_info.start..span_info.end)
     }
 
     pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
         let span_info = self.spans.resolve(span)?;
-        let index = span_info.source.0.get() as usize - 1;
+        let index = span_info.source.0.get() as usize;
         let source = self.sources.get(index)?;
         source.get_line(span_info.start..span_info.end)
     }

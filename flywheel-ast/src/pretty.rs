@@ -69,7 +69,7 @@ impl<'a> Debug for Pretty<'a, &'a Span> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let span_info = self.sources.get_span_info(*self.inner);
         f.debug_struct("Span")
-            .field("source", &span_info.source.num())
+            .field("source", &self.sources.get_source(span_info.source).name())
             .field("range", &(span_info.start..span_info.end))
             .finish()
     }
