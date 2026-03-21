@@ -5,7 +5,7 @@ use by_address::ByAddress;
 use flywheel_ast as ast;
 use flywheel_exchange as ex;
 use flywheel_sources::Symbol;
-
+use crate::Builtins;
 use crate::types::Type;
 use crate::namespace::Namespace;
 
@@ -105,16 +105,10 @@ pub struct FunctionSignature<'ast> {
     pub id: ex::FunctionId,
 }
 
-pub struct Builtins {
-    pub kw_true: Symbol,
-    pub kw_false: Symbol,
-    pub kw_u32: Symbol,
-}
-
 lowering_context! {
     pub struct LoweringContext<'ast> {
         ast: &'ast ast::Module,
-        builtins: Builtins,
+        builtins: &'ast Builtins,
 
         [CollectedNames]
         prelude_ns: Namespace<'ast>,
