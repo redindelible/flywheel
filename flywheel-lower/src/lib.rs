@@ -18,6 +18,7 @@ use crate::collect_top_levels::collect_names;
 use crate::context::{Builtins, LoweringContext};
 use crate::lower::check_types;
 
+// todo replace this by making `Builtins` have a constructor that takes in an interner
 pub const BUILTINS: &[&str] = &["u32", "true", "false"];
 
 pub fn lower_module(ast: &ast::Module, builtins: &HashMap<&'static str, Symbol>) -> CompileResult<ex::Module> {

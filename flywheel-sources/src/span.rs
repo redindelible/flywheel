@@ -102,8 +102,8 @@ pub struct SpanInfo {
 }
 
 pub(crate) struct SpanMap {
-    deduplicator: RwLock<hashbrown::HashTable<usize>>,
-    spans: boxcar::Vec<SpanInfo>,
+    deduplicator: RwLock<hashbrown::HashTable<usize>>, // todo we only ever write to this RwLock
+    spans: boxcar::Vec<SpanInfo>, // todo this is accessed too close together temporally to be a boxcar I think
 }
 
 impl SpanMap {

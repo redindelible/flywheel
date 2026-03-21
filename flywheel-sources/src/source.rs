@@ -9,11 +9,11 @@ use crate::Symbol;
 use crate::span::{Span, SpanInfo, SpanMap};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
-pub struct SourceId(pub(crate) NonZero<u32>);
+pub struct SourceId(pub(crate) NonZero<u32>);  // todo we don't need the niche
 
 impl SourceId {
     pub fn num(&self) -> u64 {
-        self.0.get() as u64 - 1
+        self.0.get() as u64 - 1  // todo create a dummy element and avoid the need for - 1, or no dummy element if no longer NonZero
     }
 }
 

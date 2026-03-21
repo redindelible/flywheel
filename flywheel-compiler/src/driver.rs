@@ -59,7 +59,7 @@ impl Driver {
 struct ModuleLoader {
     root: Utf8PathBuf,
     sources: Arc<SourceMap>,
-    interners: Arc<ObjectPool<Interner>>,
+    interners: Arc<ObjectPool<Interner>>,  // todo we don't need a bounded pool. maybe a heap would do?
 
     contents: Mutex<HashMap<Vec<Symbol>, oneshot::Receiver<ast::File>>>,
     errors: Mutex<Vec<CompileMessage>>,

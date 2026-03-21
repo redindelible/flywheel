@@ -15,7 +15,7 @@ impl Symbol {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct SymbolAndSpan(Symbol);
+pub struct SymbolAndSpan(Symbol); // todo this type makes no sense delete it
 
 impl SymbolAndSpan {
     pub fn symbol(&self) -> Symbol {
@@ -40,7 +40,7 @@ impl InternerState {
     pub fn add_builtins(&self, builtins: &[&'static str]) -> HashMap<&'static str, Symbol> {
         let source = self.sources.add_builtins(builtins.iter().copied().collect());
         let mut builtin_map = HashMap::new();
-        let mut offset = 0;
+        let mut offset = 0;  // todo we need to increment offset
         for &builtin in builtins {
             let symbol = self
                 .deduplicator
