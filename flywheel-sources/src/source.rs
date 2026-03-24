@@ -11,31 +11,49 @@ use crate::span::{Span, SpanInfo, SpanMap};
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct SourceId(pub(crate) NonZero<u32>);
 
+/// A `Source` can be an actual file, an input string, or even a virtual text
+/// for builtins to refer to. This type cannot be directly constructed and
+/// must instead be obtained from a [`SourceMap`].
 pub struct Source {
+    /// The SourceId of this `Source` within its [`SourceMap`].
     id: SourceId,
+    /// Used to add [`Span`]s into this `Source`. All `Source`s within a
+    /// [`SourceMap`] share one underlying [`SpanMap`].
     spans: Arc<SpanMap>,
 
+    /// If this `Source` is from an actual file, the path to that file.
     _absolute_path: Option<Utf8PathBuf>,
+    /// The text of this `Source`. This _must_ not change after this `Source`
+    /// is constructed, as a number of methods rely on this have a stable deref
+    /// for safety.
     text: String,
+    /// The human-readable name of this `Source`.
     name: String,
 
+    /// Stores the byte offsets of each newline in the text, appended with the
+    /// length of the text for convenience. Computed on demand and then cached.
     line_offsets: OnceLock<Vec<usize>>,
 }
 
 impl Source {
+    /// The SourceId of this `Source` within the containing [`SourceMap`].
     pub fn id(&self) -> SourceId {
         self.id
     }
 
+    /// Get the full text of this `Source`. This reference is guaranteed to be
+    /// alive for the life of the containing [`SourceMap`].
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    /// Get the human-readable name of this `Source`.
     pub fn name(&self) -> &str {
         &self.name
     }
 
     pub fn add_span(&self, range: Range<usize>) -> Span {
+        assert!(range.start <= range.end && range.end <= self.text.len());
         self.spans.add(SpanInfo { source: self.id, start: range.start, end: range.end })
     }
 
@@ -45,13 +63,12 @@ impl Source {
     /// newline counts as spanning multiple lines.
     ///
     /// # Panics
-    /// Panics if `range` is out of bounds for [`text`].
-    ///
-    /// [`text`]: Self::text
-    pub fn get_line(&self, range: Range<usize>) -> Option<LineInfo<'_>> {
+    /// Panics if `range` is out of bounds this `Source`'s text.
+    fn get_line(&self, range: Range<usize>) -> Option<LineInfo<'_>> {
+        // todo we need a `get_first_line` variant
         assert!(range.start <= range.end && range.end <= self.text.len());
 
-        let line_offsets = self
+        let line_offsets: &[usize] = self
             .line_offsets
             .get_or_init(|| {
                 let mut line_offsets: Vec<usize> = memchr_iter(b'\n', self.text.as_bytes()).collect();
@@ -81,24 +98,31 @@ impl Source {
 /// Contains information about the full line that contains a range of text.
 #[derive(Copy, Clone)]
 pub struct LineInfo<'s> {
-    /// The source containing this span.
+    /// The source containing this `Span`.
     pub source: &'s Source,
-    /// The full line, not including the newline at the end.
+    /// The full text of the line, not including the trailing newline.
     pub text: &'s str,
-    /// 0-indexed count of which line this is from the start of the source.
+    /// 0-indexed count of which line this is.
     pub line_index: usize,
-    /// The byte offset of the start of the range in [`text`].
+    /// The byte offset of the start of the `Span` within [`text`].
     pub span_start: usize,
-    /// The byte offset of the end of the range in [`text`].
+    /// The byte offset of the end of the `Span` within [`text`].
     pub span_end: usize,
 }
 
+/// This type keeps track of every [`Source`] created with it, which allows
+/// for it to resolve any [`Span`] regardless of which specific `Source` it
+/// came from.
 pub struct SourceMap {
+    /// Interns less common [`Span`]s, allowing for the size of the `Span`
+    /// type itself to remain small.
     spans: Arc<SpanMap>,
+    /// A concurrent, append-only list of every [`Source`].
     sources: boxcar::Vec<Source>,
 }
 
 impl SourceMap {
+    /// Creates a new `SourceMap`.
     pub fn new() -> SourceMap {
         let spans = Arc::new(SpanMap::new());
         let dummy_source = Source {
@@ -112,39 +136,33 @@ impl SourceMap {
         SourceMap { spans, sources: boxcar::Vec::from_iter([dummy_source]) }
     }
 
-    pub fn add_builtins(&self, text: String) -> &Source {
+    fn add_source(&self, name: String, text: String, path: Option<Utf8PathBuf>) -> &Source {
         let index = self.sources.push_with(move |index| {
-            let id = SourceId(
-                NonZero::new(index as u32).expect("The number of source files is limited to u32::MAX - 1"),
-            );
+            let id = SourceId(NonZero::new(index as u32)
+                .expect("The number of source files is limited to u32::MAX - 1"));
             Source {
                 id,
                 spans: Arc::clone(&self.spans),
                 text,
-                name: "<builtins>".into(),
-                _absolute_path: None,
+                name,
+                _absolute_path: path,
                 line_offsets: OnceLock::new(),
             }
         });
         self.sources.get(index).unwrap()
     }
 
+    pub fn add_builtins(&self, text: String) -> &Source {
+        self.add_source("<builtins>".into(), text, None)
+    }
+
     pub fn add_file(&self, path: impl Into<Utf8PathBuf>, text: String) -> &Source {
         let path = path.into();
-        let index = self.sources.push_with(move |index| {
-            let id = SourceId(
-                NonZero::new(index as u32).expect("The number of source files is limited to u32::MAX - 1"),
-            );
-            Source {
-                id,
-                spans: Arc::clone(&self.spans),
-                text,
-                name: path.to_string(),
-                _absolute_path: Some(path),
-                line_offsets: OnceLock::new(),
-            }
-        });
-        self.sources.get(index).unwrap()
+        self.add_source(path.clone().into_string(), text, Some(path))
+    }
+
+    pub fn add_string(&self, name: impl Into<String>, text: String) -> &Source {
+        self.add_source(name.into(), text, None)
     }
 
     pub fn get_source(&self, source_id: SourceId) -> &Source {
@@ -165,15 +183,28 @@ impl SourceMap {
         self.spans.resolve(span).expect("The provided Span is invalid for this SourceMap")
     }
 
+    /// Return the slice corresponding to the span. If the span is not
+    /// originally from this `SourceMap`, then this method may either panic
+    /// or return an arbitrary string.
+    ///
+    /// # Panics
+    /// May panic if `span` is not from this `SourceMap`.
     pub fn get_span(&self, span: Span) -> &str {
         self.try_get_span(span).expect("The provided Span is invalid for this SourceMap")
     }
 
+    /// Return the slice corresponding to the symbol. If the symbol is not
+    /// originally from this `SourceMap`, then this method may either panic
+    /// or return an arbitrary string.
+    ///
+    /// # Panics
+    /// May panic if `symbol` is not from this `SourceMap`.
     pub fn get_symbol(&self, symbol: Symbol) -> &str {
         self.try_get_span(symbol.span()).expect("The provided Span is invalid for this SourceMap")
     }
 
     pub fn get_span_line(&self, span: Span) -> LineInfo<'_> {
+        // todo this error message lies, it could also be None of the span spans multiple lines
         self.try_get_span_line(span).expect("The provided Span is invalid for this SourceMap")
     }
 
@@ -184,19 +215,17 @@ impl SourceMap {
         unsafe { source.text.get_unchecked(span_info.start..span_info.end) }
     }
 
-    /// Return the slice corresponding to the span.
-    ///
-    /// This method returns `None` if `span` is out-of-bounds for this [`SourceMap`].
-    /// In general, using [`Span`]s with a different [`SourceMap`] than they came
-    /// from is safe but yields unspecified results.
-    pub fn try_get_span(&self, span: Span) -> Option<&str> {
+    /// Return the slice corresponding to the span. If the span is not
+    /// originally from this `SourceMap`, then this method may either return
+    /// `None` or an arbitrary string.
+    fn try_get_span(&self, span: Span) -> Option<&str> {
         let span_info = self.spans.resolve(span)?;
         let index = span_info.source.0.get() as usize;
         let source = self.sources.get(index)?;
         source.text.get(span_info.start..span_info.end)
     }
 
-    pub fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
+    fn try_get_span_line(&self, span: Span) -> Option<LineInfo<'_>> {
         let span_info = self.spans.resolve(span)?;
         let index = span_info.source.0.get() as usize;
         let source = self.sources.get(index)?;
