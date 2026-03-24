@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use bumpalo::Bump;
 use flywheel_ast::{self as ast, File};
 use flywheel_error::{CompileMessage, CompileResult};
-use flywheel_sources::{Interner, Source, Span, Symbol, SymbolAndSpan};
+use flywheel_sources::{Interner, Source, Span, Symbol};
 
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
@@ -124,9 +124,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         Ok(self.interner.get_or_intern(token.span))
     }
 
-    fn expect_symbol_and_span(&mut self, ty: TokenType) -> ParseResult<SymbolAndSpan> {
+    fn expect_symbol_and_span(&mut self, ty: TokenType) -> ParseResult<(Symbol, Span)> {
         let token = self.expect(ty)?;
-        Ok(self.interner.get_or_intern2(token.span))
+        Ok((self.interner.get_or_intern(token.span), token.span))
     }
 
     // todo move all the allocs to alloc_try_with

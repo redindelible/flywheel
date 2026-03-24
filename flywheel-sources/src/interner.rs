@@ -14,19 +14,6 @@ impl Symbol {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct SymbolAndSpan(Symbol); // todo this type makes no sense delete it
-
-impl SymbolAndSpan {
-    pub fn symbol(&self) -> Symbol {
-        self.0
-    }
-
-    pub fn span(&self) -> Span {
-        self.0.0
-    }
-}
-
 pub struct InternerState {
     deduplicator: Arc<dashmap::DashMap<&'static str, Symbol>>,
     sources: Arc<SourceMap>,
@@ -91,10 +78,6 @@ impl Interner {
             })
             .unwrap()
             .unwrap()
-    }
-
-    pub fn get_or_intern2(&mut self, span: Span) -> SymbolAndSpan {
-        SymbolAndSpan(self.get_or_intern(span))
     }
 
     pub fn resolve(&self, symbol: Symbol) -> &str {

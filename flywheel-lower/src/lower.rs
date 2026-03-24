@@ -158,23 +158,21 @@ impl<'ctx, 'ast> FunctionTypeResolver<'ctx, 'ast> {
     fn lower_expr<'a>(&mut self, expr: &'ast ast::Expr<'ast>, expected: Option<Type<'ast>>) -> CompileResult<Type<'ast>> {
         use ast::Expr;
 
-        let actual_ty = match expr {
-            Expr::Bool(span_and_symbol) => {
-                let sym = span_and_symbol.symbol();
+        let actual_ty = match *expr {
+            Expr::Bool((symbol, _)) => {
                 let builtins = self.ctx.builtins();
-                assert!(sym == builtins.kw_false || sym == builtins.kw_true);
-                self.builder.push_bool(sym == builtins.kw_true);
+                assert!(symbol == builtins.kw_false || symbol == builtins.kw_true);
+                self.builder.push_bool(symbol == builtins.kw_true);
                 Type::Bool
             }
-            Expr::Integer(span_and_symbol) => {
-                let symbol = span_and_symbol.symbol();
+            Expr::Integer((symbol, _)) => {
                 let text = self.ctx.ast().sources.get_symbol(symbol);
                 let number = text.parse::<i64>().unwrap();
                 self.builder.push_integer(number);
                 Type::U32
             }
-            Expr::Name(symbol_and_span) => {
-                let value = self.scopes.resolve_as_value(symbol_and_span.symbol())?;
+            Expr::Name((symbol, _)) => {
+                let value = self.scopes.resolve_as_value(symbol)?;
                 match value {
                     Value::Local { index, ty, span: _ } => {
                         self.builder.load_local(*index);

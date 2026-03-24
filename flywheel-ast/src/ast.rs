@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use bumpalo::Bump;
 
-use flywheel_sources::{SourceMap, Span, Symbol, SymbolAndSpan};
+use flywheel_sources::{SourceMap, Span, Symbol};
 
 pub struct Module {
     pub sources: Arc<SourceMap>,
@@ -99,11 +99,11 @@ pub struct Return<'ast> {
 }
 
 pub enum Expr<'ast> {
-    Bool(SymbolAndSpan),
-    Integer(SymbolAndSpan),
-    Float(SymbolAndSpan),
-    String(SymbolAndSpan),
-    Name(SymbolAndSpan),
+    Bool((Symbol, Span)),
+    Integer((Symbol, Span)),
+    Float((Symbol, Span)),
+    String((Symbol, Span)),
+    Name((Symbol, Span)),
     Block(&'ast Block<'ast>),
     Attr(&'ast Attr<'ast>),
     Index(&'ast Index<'ast>),
@@ -116,8 +116,8 @@ pub enum Expr<'ast> {
 impl Expr<'_> {
     pub fn span(&self) -> Span {
         use Expr::*;
-        match self {
-            Bool(symbol) | Integer(symbol) | Float(symbol) | String(symbol) | Name(symbol) => symbol.span(),
+        match *self {
+            Bool((_, span)) | Integer((_, span)) | Float((_, span)) | String((_, span)) | Name((_, span)) => span,
             Block(inner) => inner.span,
             Attr(inner) => inner.span,
             Index(inner) => inner.span,

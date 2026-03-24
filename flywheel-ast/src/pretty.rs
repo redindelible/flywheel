@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use flywheel_sources::{SourceMap, Span, Symbol, SymbolAndSpan};
+use flywheel_sources::{SourceMap, Span, Symbol};
 
 use crate::ast::*;
 
@@ -59,9 +59,9 @@ impl<'a> Debug for Pretty<'a, &'a Symbol> {
     }
 }
 
-impl<'a> Debug for Pretty<'a, &'a SymbolAndSpan> {
+impl<'a> Debug for Pretty<'a, &'a (Symbol, Span)> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.sources.get_symbol(self.inner.symbol()))
+        f.write_str(self.sources.get_span(self.inner.1))
     }
 }
 
