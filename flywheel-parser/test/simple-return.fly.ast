@@ -12,19 +12,19 @@ FileAST {
                             7,
                         ),
                         span: Span {
-                            source: 0,
+                            source: "<test>",
                             range: 23..32,
                         },
                     },
                 ],
                 trailing_expr: None,
                 span: Span {
-                    source: 0,
+                    source: "<test>",
                     range: 17..34,
                 },
             },
             span: Span {
-                source: 0,
+                source: "<test>",
                 range: 0..34,
             },
         },

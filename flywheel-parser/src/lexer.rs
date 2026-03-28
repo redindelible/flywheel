@@ -186,7 +186,7 @@ pub(super) struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a Source) -> Lexer<'a> {
         let text = source.text();
-        let eof = source.add_span(text.len()..text.len() + 1);
+        let eof = source.add_span(text.len()..text.len());
         Lexer { source, eof, inner: Some(logos::Lexer::new(text)) }
     }
 

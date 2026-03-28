@@ -9,12 +9,12 @@ FileAST {
                 stmts: [],
                 trailing_expr: None,
                 span: Span {
-                    source: 0,
+                    source: "<test>",
                     range: 17..20,
                 },
             },
             span: Span {
-                source: 0,
+                source: "<test>",
                 range: 0..20,
             },
         },

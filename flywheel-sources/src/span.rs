@@ -175,15 +175,15 @@ mod test {
     #[test]
     fn test_u48_round_trip() {
         for value in [0, 1, 0xFF, 0xabcd, 0x4567_89ab_cdef] {
-            let packed = u48::try_from(value).expect("Should fit into 48 bits");
-            assert_eq!(packed.to_u64(), value);
+            let packed = u48::try_from(value).expect(&format!("{} should fit into 48 bits", value));
+            assert_eq!(packed.to_u64(), value, "The round-tripped value should equal the original value");
         }
     }
 
     #[test]
     fn test_u48_too_big() {
         for value in [0x0001_0000_0000_0000, u64::MAX] {
-            assert!(u48::try_from(value).is_err(), "Should be too big");
+            assert!(u48::try_from(value).is_err(), "{} should be too big", value);
         }
     }
 
