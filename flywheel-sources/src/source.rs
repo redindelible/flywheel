@@ -57,15 +57,15 @@ impl Source {
         self.spans.add(SpanInfo { source: self.id, start: range.start, end: range.end })
     }
 
+    pub fn add_eof_span(&self) -> Span {
+        self.add_span(self.text.len()..self.text.len())
+    }
+
     /// Gets information about the surrounding line of the provided range.
-    ///
-    /// If the range spans multiple lines, returns `None`. Note that a trailing
-    /// newline counts as spanning multiple lines.
     ///
     /// # Panics
     /// Panics if `range` is out of bounds this `Source`'s text.
-    fn get_line(&self, range: Range<usize>) -> Option<LineInfo<'_>> {
-        // todo we need a `get_first_line` variant
+    fn get_line(&self, range: Range<usize>) -> LineInfo<'_> {
         assert!(range.start <= range.end && range.end <= self.text.len());
 
         let line_offsets: &[usize] = self
@@ -81,16 +81,13 @@ impl Source {
             0 => (0, line_offsets[0]),
             line_offsets_index => (line_offsets[line_offsets_index - 1] + 1, line_offsets[line_offsets_index]),
         };
-        if range.end <= line_end {
-            Some(LineInfo {
-                source: self,
-                text: &self.text[line_start..line_end],
-                line_index,
-                span_start: range.start - line_start,
-                span_end: range.end - line_start,
-            })
-        } else {
-            None
+
+        LineInfo {
+            source: self,
+            text: &self.text[line_start..line_end],
+            line_index,
+            span_start: range.start - line_start,
+            span_end: range.end - line_start,
         }
     }
 }
@@ -229,6 +226,206 @@ impl SourceMap {
         let span_info = self.spans.resolve(span)?;
         let index = span_info.source.0.get() as usize;
         let source = self.sources.get(index)?;
-        source.get_line(span_info.start..span_info.end)
+        Some(source.get_line(span_info.start..span_info.end))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::num::NonZero;
+    use std::sync::Arc;
+
+    use crate::interner::Interner;
+    use crate::source::{SourceId, SourceMap};
+
+    // --- SourceMap construction ---
+
+    #[test]
+    fn test_add_source_variants() {
+        let sources = SourceMap::new();
+        let s = sources.add_string("my source", "text".to_string());
+        assert_eq!(s.name(), "my source");
+        assert_eq!(s.text(), "text");
+        let s = sources.add_builtins("text".to_string());
+        assert_eq!(s.name(), "<builtins>");
+        assert_eq!(s.text(), "text");
+        let s = sources.add_file("path/to/file.fw", "text".to_string());
+        assert_eq!(s.name(), "path/to/file.fw");
+        assert_eq!(s.text(), "text");
+    }
+
+    #[test]
+    fn test_source_ids_are_distinct() {
+        let sources = SourceMap::new();
+        let a = sources.add_string("a", String::new());
+        let b = sources.add_string("b", String::new());
+        let c = sources.add_string("c", String::new());
+        assert_ne!(a.id(), b.id());
+        assert_ne!(b.id(), c.id());
+        assert_ne!(a.id(), c.id());
+    }
+
+    #[test]
+    fn test_get_symbol() {
+        let sources = Arc::new(SourceMap::new());
+        let source = sources.add_string("test", "hello".to_string());
+        let mut interner = Interner::new(Arc::clone(&sources));
+        let sym = interner.get_or_intern(source.add_span(0..5));
+        assert_eq!(sources.get_symbol(sym), "hello");
+    }
+
+    #[test]
+    fn test_get_source_round_trip() {
+        let sources = SourceMap::new();
+        let source = sources.add_string("test", "content".to_string());
+        let retrieved = sources.get_source(source.id());
+        assert_eq!(retrieved.text(), "content");
+        assert_eq!(retrieved.name(), "test");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_source_panics_on_invalid_id() {
+        let sources = SourceMap::new();
+        sources.get_source(SourceId(NonZero::new(999).unwrap()));
+    }
+
+    // --- add_span / add_eof_span ---
+
+    #[test]
+    fn test_span_resolution() {
+        let sources = SourceMap::new();
+        let source = sources.add_string("test", "hello world".to_string());
+        assert_eq!(sources.get_span(source.add_span(0..5)), "hello");
+        assert_eq!(sources.get_span(source.add_span(6..11)), "world");
+        assert_eq!(sources.get_span(source.add_span(5..5)), ""); // zero-length mid-text
+        assert_eq!(sources.get_span(source.add_eof_span()), "");  // eof span
+        let info = sources.get_span_info(source.add_span(2..7));
+        assert_eq!(info.source, source.id());
+        assert_eq!(info.start, 2);
+        assert_eq!(info.end, 7);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_span_panics_when_end_past_text() {
+        let sources = SourceMap::new();
+        sources.add_string("test", "hello".to_string()).add_span(0..6);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_span_panics_when_start_after_end() {
+        let sources = SourceMap::new();
+        sources.add_string("test", "hello".to_string()).add_span(3..2);
+    }
+
+    // --- get_span_line ---
+
+    #[test]
+    fn test_get_line_multiline() {
+        let sources = SourceMap::new();
+
+        // Single-line source: entire text is line 0.
+        let source = sources.add_string("test", "hello world".to_string());
+        let line = sources.get_span_line(source.add_span(6..11));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (0, "hello world", 6, 11));
+
+        // Multi-line: first, middle, and last line.
+        let source = sources.add_string("test", "foo\nbar\nbaz".to_string());
+        let line = sources.get_span_line(source.add_span(1..2));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (0, "foo", 1, 2));
+        let line = sources.get_span_line(source.add_span(4..7));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (1, "bar", 0, 3));
+        let line = sources.get_span_line(source.add_span(9..10));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (2, "baz", 1, 2));
+    }
+
+    #[test]
+    fn test_get_line_newline_spans() {
+        // Both cases use "foo\nbar" and exercise spans where span_end extends past
+        // the line's own text. get_line keys off range.start for the line lookup.
+        let sources = SourceMap::new();
+        let source = sources.add_string("test", "foo\nbar".to_string());
+
+        // Span crossing the newline: keys off start=1 → line 0, span_end past line text.
+        let line = sources.get_span_line(source.add_span(1..6));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (0, "foo", 1, 6));
+
+        // Span pointing to the newline itself: binary_search hits the newline's offset
+        // in line_offsets, landing on the line that ends with it.
+        let line = sources.get_span_line(source.add_span(3..4));
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (0, "foo", 3, 4));
+    }
+
+    #[test]
+    fn test_get_line_eof_spans() {
+        let sources = SourceMap::new();
+
+        // Empty source: single line with empty text.
+        let source = sources.add_string("test", "".to_string());
+        let line = sources.get_span_line(source.add_eof_span());
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (0, "", 0, 0));
+
+        // Trailing newline: EOF lands on the empty line after it.
+        let source = sources.add_string("test", "foo\n".to_string());
+        let line = sources.get_span_line(source.add_eof_span());
+        assert_eq!((line.line_index, line.text, line.span_start, line.span_end), (1, "", 0, 0));
+    }
+
+    #[test]
+    fn test_multiple_sources_route_correctly() {
+        // Spans from two different sources must resolve to the right source's text,
+        // both for get_span and get_span_line. This would fail if get_span or
+        // get_span_line always used the first source's index.
+        let sources = SourceMap::new();
+        let a = sources.add_string("a", "foo\nbar".to_string());
+        let b = sources.add_string("b", "baz\nqux".to_string());
+
+        assert_eq!(sources.get_span(a.add_span(0..3)), "foo");
+        assert_eq!(sources.get_span(b.add_span(0..3)), "baz");
+
+        let line_a = sources.get_span_line(a.add_span(4..7));
+        assert_eq!(line_a.source.id(), a.id());
+        assert_eq!(line_a.text, "bar");
+
+        let line_b = sources.get_span_line(b.add_span(4..7));
+        assert_eq!(line_b.source.id(), b.id());
+        assert_eq!(line_b.text, "qux");
+    }
+
+    #[test]
+    fn test_get_line_leading_newline() {
+        // Text starting with '\n' means line 0 is empty. The first real content
+        // is on line 1. Exercises the 0 => arm with an empty line at the front.
+        let sources = SourceMap::new();
+        let source = sources.add_string("test", "\nfoo".to_string());
+
+        let line = sources.get_span_line(source.add_span(0..0));
+        assert_eq!(line.line_index, 0);
+        assert_eq!(line.text, "");
+        assert_eq!(line.span_start, 0);
+        assert_eq!(line.span_end, 0);
+
+        let line = sources.get_span_line(source.add_span(1..4));
+        assert_eq!(line.line_index, 1);
+        assert_eq!(line.text, "foo");
+        assert_eq!(line.span_start, 0);
+        assert_eq!(line.span_end, 3);
+    }
+
+    // --- unsafe accessors ---
+
+    #[test]
+    fn test_unsafe_accessors_match_safe() {
+        let sources = SourceMap::new();
+        let source = sources.add_string("test", "hello world".to_string());
+        let span = source.add_span(6..11);
+        unsafe {
+            let u = sources.get_source_unchecked(source.id());
+            assert_eq!(u.text(), source.text());
+            assert_eq!(u.name(), source.name());
+            assert_eq!(sources.get_span_unchecked(span), sources.get_span(span));
+        }
     }
 }

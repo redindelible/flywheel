@@ -173,16 +173,12 @@ mod test {
     use crate::span::{SpanInfo, SpanInner, SpanMap, u48};
 
     #[test]
-    fn test_u48_round_trip() {
-        for value in [0, 1, 0xFF, 0xabcd, 0x4567_89ab_cdef] {
+    fn test_u48() {
+        for value in [0, 1, 0xFF, 0xabcd, 0x4567_89ab_cdef, u48::MAX] {
             let packed = u48::try_from(value).expect(&format!("{} should fit into 48 bits", value));
             assert_eq!(packed.to_u64(), value, "The round-tripped value should equal the original value");
         }
-    }
-
-    #[test]
-    fn test_u48_too_big() {
-        for value in [0x0001_0000_0000_0000, u64::MAX] {
+        for value in [u48::MAX + 1, 0x0001_0000_0000_0000, u64::MAX] {
             assert!(u48::try_from(value).is_err(), "{} should be too big", value);
         }
     }
@@ -190,10 +186,18 @@ mod test {
     #[test]
     fn test_interner_inline() {
         let spans = SpanMap::new();
-        let span_info = SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 16, end: 18 };
-        let span = spans.add(span_info);
-        assert!(matches!(span.0, SpanInner::Inline { .. }));
-        assert_eq!(Some(span_info), spans.resolve(span));
+        let infos = [
+            SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 16, end: 18 },
+            // Exact boundaries: last value that fits in each field.
+            SpanInfo { source: SourceId(NonZero::new(u16::MAX as u32).unwrap()), start: 0, end: 0 },
+            SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: u32::MAX as usize, end: u32::MAX as usize },
+            SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 0, end: u16::MAX as usize },
+        ];
+        for span_info in infos {
+            let span = spans.add(span_info);
+            assert!(matches!(span.0, SpanInner::Inline { .. }));
+            assert_eq!(Some(span_info), spans.resolve(span));
+        }
     }
 
     #[test]
@@ -204,6 +208,10 @@ mod test {
             SpanInfo { source: SourceId(NonZero::new(u32::MAX - 1).unwrap()), start: 16, end: 18 },
             SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 0x0001_0000_0000, end: 0x0001_0000_0015 },
             SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 15, end: 0x0001_0015 },
+            // Exact boundaries: first value that overflows each field.
+            SpanInfo { source: SourceId(NonZero::new(u16::MAX as u32 + 1).unwrap()), start: 0, end: 0 },
+            SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: u32::MAX as usize + 1, end: u32::MAX as usize + 1 },
+            SpanInfo { source: SourceId(NonZero::new(1).unwrap()), start: 0, end: u16::MAX as usize + 1 },
         ];
         for span_info in infos {
             let span = spans.add(span_info);
@@ -228,6 +236,26 @@ mod test {
         for (span_info, first_span) in infos.into_iter().zip(first_spans) {
             assert_eq!(first_span, spans.add(span_info));
             assert_eq!(spans.resolve(first_span), Some(span_info));
+        }
+    }
+
+    // Zero-length spans are used as EOF sentinels (see Source::add_eof_span), where
+    // start == end == text.len(). Verify they round-trip for both representation paths.
+    #[test]
+    fn test_zero_length_span() {
+        let spans = SpanMap::new();
+        let src = SourceId(NonZero::new(1).unwrap());
+
+        for (pos, expected_repr) in [
+            (42usize,                "inline - mid-file"),
+            (u32::MAX as usize,      "inline - at offset boundary (EOF of a 4 GiB file)"),
+            (u32::MAX as usize + 1,  "interned - just past offset boundary"),
+        ] {
+            let info = SpanInfo { source: src, start: pos, end: pos };
+            let span = spans.add(info);
+            let resolved = spans.resolve(span).unwrap();
+            assert_eq!(resolved.start, resolved.end, "{expected_repr}: start should equal end");
+            assert_eq!(resolved, info, "{expected_repr}: round-trip should recover the original SpanInfo");
         }
     }
 }
