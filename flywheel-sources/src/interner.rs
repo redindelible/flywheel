@@ -27,7 +27,7 @@ impl InternerState {
     pub fn add_builtins(&self, builtins: &[&'static str]) -> HashMap<&'static str, Symbol> {
         let source = self.sources.add_builtins(builtins.iter().copied().collect());
         let mut builtin_map = HashMap::new();
-        let mut offset = 0;  // todo we need to increment offset
+        let mut offset = 0;
         for &builtin in builtins {
             let symbol = self
                 .deduplicator

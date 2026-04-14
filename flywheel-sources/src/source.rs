@@ -201,7 +201,6 @@ impl SourceMap {
     }
 
     pub fn get_span_line(&self, span: Span) -> LineInfo<'_> {
-        // todo this error message lies, it could also be None of the span spans multiple lines
         self.try_get_span_line(span).expect("The provided Span is invalid for this SourceMap")
     }
 
