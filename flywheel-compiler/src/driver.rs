@@ -54,7 +54,7 @@ impl Driver {
     }
 
     pub fn display_message(&self, message: &CompileMessage) {
-        eprintln!("{}", message.display(&self.sources));
+        eprint!("{}", message.display(&self.sources));
     }
 }
 

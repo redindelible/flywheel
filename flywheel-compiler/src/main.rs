@@ -4,7 +4,13 @@ use flywheel_compiler::Driver;
 
 fn main() {
     let driver = Driver::new();
-    driver.add_module("<main>", "flywheel-compiler/tests/single_file/main.fly").unwrap();
+    match driver.add_module("<main>", "flywheel-compiler/tests/single_file/main.fly") {
+        Ok(()) => (),
+        Err(e) => {
+            driver.display_message(&e);
+        }
+    }
+
     // let source = frontend.block_on(frontend.query_file_source("test/import.fly")).unwrap();
     //
     // let start = Instant::now();

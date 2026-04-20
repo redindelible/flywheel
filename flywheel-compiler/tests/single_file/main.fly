@@ -1,1 +1,3 @@
-fn main() -> u32 { 42 }
+fn identity(n: u32) -> u32 {
+    n
+}

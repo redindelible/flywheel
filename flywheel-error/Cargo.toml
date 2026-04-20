@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 flywheel-sources = { path = "../flywheel-sources" }
+yansi = "1.0.1"

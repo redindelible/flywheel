@@ -14,14 +14,19 @@ pub enum Level {
 
 impl Display for Level {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Level::Note => "Note",
-                Level::Error => "Error",
-            }
-        )
+        match self {
+            Level::Note => write!(f, "{}", "Note"),
+            Level::Error => write!(f, "{}", "Error"),
+        }
+    }
+}
+
+impl Level {
+    fn color(&self) -> yansi::Color {
+        match self {
+            Level::Note => yansi::Color::Green,
+            Level::Error => yansi::Color::Red,
+        }
     }
 }
 
@@ -106,21 +111,27 @@ pub struct CompileErrorWithDisplay<'a> {
 
 impl Display for CompileErrorWithDisplay<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let indent = " |  ".repeat(self.level);
+        use yansi::Paint;
+
         let message = &*self.error.message.get_text(self.sources);
-        writeln!(f, "{}{}: {}", &indent, self.error.level, message)?;
+        writeln!(f, "{}{} {}",
+                 self.error.level.fg(self.error.level.color()).bold(),
+                 ":".bold(),
+                 message.bold())?;
+
         if let Some(span) = self.error.span {
             let LineInfo { source, text, line_index, span_start, span_end } = self.sources.get_span_line(span);
-            let line_number = format!("{: >3}", line_index + 1);
-            writeln!(f, "{} {}--> {}", &indent, " ".repeat(line_number.len()), source.name())?;
-            writeln!(f, "{}{} | {}", &indent, line_number, text)?;
+            let line_number = format!("{: >4}", line_index + 1);
+            let padding = " ".repeat(line_number.len());
+            writeln!(f, "{}{} {}:{}:{}", &padding, "-->".bright_blue().bold(), source.name(), line_index + 1, span_start + 1)?;
+            writeln!(f, "{} {} {}", line_number.bright_blue().bold(), "|".bright_blue().bold(), text)?;
             writeln!(
                 f,
-                "{}{}   {}{}",
-                &indent,
-                " ".repeat(line_number.len()),
+                "{} {} {}{}",
+                &padding,
+                "|".bright_blue().bold(),
                 " ".repeat(span_start),
-                "^".repeat(span_end - span_start),
+                "^".repeat(span_end - span_start).yellow().bold(),
             )?;
         }
         for child in &self.error.children {
