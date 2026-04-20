@@ -9,6 +9,7 @@ flywheel-error = { path = "../flywheel-error" }
 flywheel-parser = { path = "../flywheel-parser" }
 flywheel-lower = { path = "../flywheel-lower" }
 flywheel-sources = { path = "../flywheel-sources" }
+flywheel-exchange = { path = "../flywheel-exchange" }
 
 camino = "1.1.9"
 crossbeam-channel = "0.5.15"

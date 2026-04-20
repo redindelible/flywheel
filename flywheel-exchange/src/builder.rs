@@ -95,20 +95,19 @@ impl FunctionBuilder {
             name: self.name,
             parameters: self.parameters,
             return_type: self.return_type,
-            blocks: self.blocks.into_iter().map(|(id, info)| {
+            blocks: self.blocks.into_values().map(|info| {
                 let BlockInformation::Complete {
-                    predecessors,
+                    predecessors: _,
                     stack,
                     instructions,
                     terminator,
                 } = info else { panic!() };
 
-                let block = Block {
+                Block {
                     retained_locals: Vec::from_iter(stack),
                     instructions,
                     terminator
-                };
-                (id, block)
+                }
             }).collect()
         }
     }

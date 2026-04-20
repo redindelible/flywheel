@@ -188,7 +188,7 @@ impl<'ctx, 'ast> FunctionTypeResolver<'ctx, 'ast> {
 }
 
 pub(crate) fn check_types(ctx: LoweringContext<AllFunctionSignatures>) -> CompileResult<ex::Module> {
-    let mut functions = HashMap::new();
+    let mut functions = Vec::new();
     for (path_in_module, file) in &ctx.ast().contents {
         for top_level in file.top_levels() {
             match *top_level {
@@ -203,7 +203,7 @@ pub(crate) fn check_types(ctx: LoweringContext<AllFunctionSignatures>) -> Compil
                     this.lower_block(&func_.body, Some(signature.return_type.clone()))?;
                     this.builder.return_();
 
-                    functions.insert(signature.id, this.builder.finish());
+                    functions.push(this.builder.finish());
                 }
                 _ => (),
             };

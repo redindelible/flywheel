@@ -7,6 +7,7 @@ use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_lower::{lower_module, Builtins};
 use flywheel_parser::parse_source;
 use flywheel_sources::{Interner, InternerState, SourceMap, Symbol};
+use flywheel_exchange::text::{pretty_function, pretty_module};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::object_pool::ObjectPool;
@@ -45,6 +46,8 @@ impl Driver {
         let path = path.into();
         let module = self.runtime.install(move || ModuleLoader::load(path, sources, interners))?;
         let ex_module = lower_module(&module, &self.builtins)?;
+
+        pretty_module(&mut std::io::stdout(), &ex_module).unwrap();
 
         assert!(item.set(()).is_ok());
         Ok(())

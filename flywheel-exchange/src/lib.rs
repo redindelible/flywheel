@@ -1,5 +1,5 @@
 mod interchange;
-// pub mod text;
+pub mod text;
 mod validator;
 mod builder;
 

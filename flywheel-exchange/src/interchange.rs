@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use arcstr::ArcStr;
 use enum_map::Enum;
 use strum::{EnumDiscriminants, VariantArray};
@@ -10,7 +8,7 @@ pub struct FunctionId(pub u32);
 
 #[derive(Debug)]
 pub struct Module {
-    pub functions: HashMap<FunctionId, Function>,
+    pub functions: Vec<Function>,
 }
 
 #[derive(Debug)]
@@ -18,7 +16,7 @@ pub struct Function {
     pub name: ArcStr,
     pub parameters: Vec<Type>,
     pub return_type: Type,
-    pub blocks: HashMap<BlockId, Block>,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -36,16 +34,16 @@ pub struct Block {
 #[strum_discriminants(derive(Enum, VariantArray))]
 pub enum Instruction {
     Pop,
-    LoadConst { name: ArcStr },
+    // LoadConst { name: ArcStr },
     LoadLocal { index: u32 },
     StoreLocal { index: u32 },
     LoadUnit,
     LoadTrue,
     LoadFalse,
     LoadInteger(i64),
-    LoadFloat(f64),
-    Upcast { to_ty: Type },
-    Call { arguments: u32 },
+    // LoadFloat(f64),
+    // Upcast { to_ty: Type },
+    // Call { arguments: u32 },
     LessEqual,
     Equal,
     Add,
