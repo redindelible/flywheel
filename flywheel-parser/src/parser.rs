@@ -124,6 +124,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
         Ok(self.interner.get_or_intern(token.span))
     }
 
+    fn expect_identifier(&mut self) -> ParseResult<ast::Name> {
+        let (symbol, span) = self.expect_symbol_and_span(TokenType::Identifier)?;
+        Ok(ast::Name { symbol, span })
+    }
+
     fn expect_symbol_and_span(&mut self, ty: TokenType) -> ParseResult<(Symbol, Span)> {
         let token = self.expect(ty)?;
         Ok((self.interner.get_or_intern(token.span), token.span))
@@ -189,7 +194,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_struct(&mut self) -> ParseResult<ast::Struct<'ast>> {
         let start = self.start();
         self.expect(TokenType::Struct)?;
-        let name = self.expect_symbol(TokenType::Identifier)?;
+        let name = self.expect_identifier()?;
 
         let mut fields = Vec::new();
         self.expect(TokenType::LeftBrace)?;
@@ -202,7 +207,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
     fn parse_field(&mut self) -> ParseResult<ast::StructField<'ast>> {
         let start = self.start();
-        let name = self.expect_symbol(TokenType::Identifier)?;
+        let name = self.expect_identifier()?;
         self.expect(TokenType::Colon)?;
         let ty = self.parse_type()?;
         self.expect(TokenType::Semicolon)?;
@@ -212,13 +217,28 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_function(&mut self) -> ParseResult<ast::Function<'ast>> {
         let start = self.start();
         self.expect(TokenType::Fn)?;
-        let name = self.expect_symbol(TokenType::Identifier)?;
+        let name = self.expect_identifier()?;
+
         self.expect(TokenType::LeftParenthesis)?;
+        let mut parameters = Vec::new();
+        while !self.curr_is_ty(TokenType::RightParenthesis) {
+            let parameter_name = self.expect_identifier()?;
+            self.expect(TokenType::Colon)?;
+            let parameter_type = self.parse_type()?;
+            parameters.push(ast::Parameter { name: parameter_name, ty: parameter_type });
+
+            if self.curr_is_ty(TokenType::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
         self.expect(TokenType::RightParenthesis)?;
+
         self.expect(TokenType::LeftArrow)?;
         let return_type = self.parse_type()?;
         let body = self.parse_block()?;
-        Ok(ast::Function { name, return_type, body, span: self.span_from(start) })
+        Ok(ast::Function { name, parameters: self.ast_arena.alloc_slice_fill_iter(parameters), return_type, body, span: self.span_from(start) })
     }
 
     fn parse_block(&mut self) -> ParseResult<ast::Block<'ast>> {
@@ -361,7 +381,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     fn parse_expr_terminal(&mut self) -> ParseResult<ast::Expr<'ast>> {
         let start = self.start();
         if self.curr_is_ty(TokenType::Identifier) {
-            let name = self.expect_symbol_and_span(TokenType::Identifier)?;
+            let name = self.expect_identifier()?;
             Ok(ast::Expr::Name(name))
         } else if self.curr_is_ty(TokenType::Integer) {
             let constant = self.expect_symbol_and_span(TokenType::Integer)?;
@@ -404,7 +424,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
     }
 
     fn parse_type(&mut self) -> ParseResult<ast::Type<'ast>> {
-        let token = self.expect_symbol(TokenType::Identifier)?;
+        let token = self.expect_identifier()?;
         Ok(ast::Type { name: token, phantom: PhantomData })
     }
 }

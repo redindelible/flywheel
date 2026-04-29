@@ -35,6 +35,12 @@ impl File {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Name {
+    pub symbol: Symbol,
+    pub span: Span,
+}
+
 pub enum TopLevel<'ast> {
     Function(&'ast Function<'ast>),
     Struct(&'ast Struct<'ast>),
@@ -42,14 +48,20 @@ pub enum TopLevel<'ast> {
 }
 
 pub struct Function<'ast> {
-    pub name: Symbol,
+    pub name: Name,
+    pub parameters: &'ast [Parameter<'ast>],
     pub return_type: Type<'ast>,
     pub body: Block<'ast>,
     pub span: Span,
 }
 
+pub struct Parameter<'ast> {
+    pub name: Name,
+    pub ty: Type<'ast>,
+}
+
 pub struct Struct<'ast> {
-    pub name: Symbol,
+    pub name: Name,
     pub fields: &'ast [StructField<'ast>],
     pub span: Span,
 }
@@ -62,7 +74,7 @@ pub struct Import<'ast> {
 }
 
 pub struct StructField<'ast> {
-    pub name: Symbol,
+    pub name: Name,
     pub ty: Type<'ast>,
     pub span: Span,
 }
@@ -103,7 +115,7 @@ pub enum Expr<'ast> {
     Integer((Symbol, Span)),
     Float((Symbol, Span)),
     String((Symbol, Span)),
-    Name((Symbol, Span)),
+    Name(Name),
     Block(&'ast Block<'ast>),
     Attr(&'ast Attr<'ast>),
     Index(&'ast Index<'ast>),
@@ -117,7 +129,8 @@ impl Expr<'_> {
     pub fn span(&self) -> Span {
         use Expr::*;
         match *self {
-            Bool((_, span)) | Integer((_, span)) | Float((_, span)) | String((_, span)) | Name((_, span)) => span,
+            Bool((_, span)) | Integer((_, span)) | Float((_, span)) | String((_, span)) => span,
+            Name(ident) => ident.span,
             Block(inner) => inner.span,
             Attr(inner) => inner.span,
             Index(inner) => inner.span,
@@ -181,6 +194,6 @@ pub enum BinaryOp {
 }
 
 pub struct Type<'ast> {
-    pub name: Symbol,
+    pub name: Name,
     pub phantom: PhantomData<&'ast ()>,
 }

@@ -13,12 +13,11 @@ pub(crate) fn collect_function_signatures(
     for (path_in_module, file) in &ctx.ast().contents {
         let mut next_function_id = (0..).map(ex::FunctionId);
         let file_namespace = &ctx.collected_names().file_namespaces[path_in_module.as_slice()];
-        let search_path = SearchPath::from(file_namespace).then(&ctx.collected_names().prelude_ns);
 
         for top_level in file.top_levels() {
             match *top_level {
                 ast::TopLevel::Function(func_) => {
-                    let return_type = ctx.resolve_type(&search_path, &func_.return_type)?;
+                    let return_type = ctx.resolve_type([&ctx.collected_names().prelude_ns, file_namespace], &func_.return_type)?;
                     signatures.insert(func_, FunctionSignature {
                         return_type,
                         id: next_function_id.next().unwrap()

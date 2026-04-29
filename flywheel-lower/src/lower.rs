@@ -2,63 +2,33 @@ use std::collections::HashMap;
 
 use flywheel_ast as ast;
 use flywheel_exchange as ex;
-use flywheel_error::{CompileMessage, CompileResult};
+use flywheel_error::{CompileMessage, CompileResult, CompileResultExt};
 use flywheel_sources::{Span, Symbol};
 
 use crate::context::{AllFunctionSignatures, LoweringContext};
+use crate::namespace::{Item, Namespace, SearchPath, Value};
 use crate::types::Type;
 
-
-enum Value<'ast> {
-    Local { index: ex::LocalId, ty: Type<'ast>, span: Span }
+struct Scopes<'ast> {
+    scopes: Vec<Namespace<'ast>>,
 }
-
-struct ScopeItem<'ast> {
-    value: Option<Value<'ast>>,
-    ty: Option<Type<'ast>>,
-    span: Span,
-}
-
-struct Scope<'ast> {
-    items: HashMap<Symbol, ScopeItem<'ast>>,
-}
-
-struct Scopes<'ast>(Vec<Scope<'ast>>);
 
 impl<'ast> Scopes<'ast> {
-    fn current(&self) -> &Scope<'ast> {
-        self.0.last().unwrap()
+    fn current(&self) -> &Namespace<'ast> {
+        self.scopes.last().unwrap()
     }
 
-    fn current_mut(&mut self) -> &mut Scope<'ast> {
-        self.0.last_mut().unwrap()
+    fn current_mut(&mut self) -> &mut Namespace<'ast> {
+        self.scopes.last_mut().unwrap()
     }
+}
 
-    fn resolve(&self, name: Symbol) -> CompileResult<&ScopeItem<'ast>> {
-        for scope in self.0.iter().rev() {
-            if let Some(item) = scope.items.get(&name) {
-                return Ok(item);
-            }
-        }
-        Err(CompileMessage::error_dyn(move |s| format!("Could not resolve {}", s.get_symbol(name))))
-    }
+impl<'ctx, 'ast> IntoIterator for &'ctx Scopes<'ast> {
+    type Item = &'ctx Namespace<'ast>;
+    type IntoIter = std::slice::Iter<'ctx, Namespace<'ast>>;
 
-    fn resolve_type(&mut self, ty: &'ast ast::Type<'ast>) -> CompileResult<Type<'ast>> {
-        let resolved: &ScopeItem = self.resolve(ty.name)?;
-        if let Some(ty) = &resolved.ty {
-            Ok(ty.clone())
-        } else {
-            todo!()
-        }
-    }
-
-    fn resolve_as_value(&self, name: Symbol) -> CompileResult<&Value<'ast>> {
-        let resolved: &ScopeItem = self.resolve(name)?;
-        if let Some(value) = &resolved.value {
-            Ok(value)
-        } else {
-            todo!()
-        }
+    fn into_iter(self) -> Self::IntoIter {
+        self.scopes.iter()
     }
 }
 
@@ -75,13 +45,13 @@ impl<'ctx, 'ast> FunctionTypeResolver<'ctx, 'ast> {
     fn add_local(&mut self, name: Symbol, ty: Type<'ast>, span: Span) -> CompileResult<()> {
         use std::collections::hash_map::Entry;
 
-        let current_scope: &mut Scope<'ast> = self.scopes.current_mut();
+        let current_scope: &mut Namespace<'ast> = self.scopes.current_mut();
         match current_scope.items.entry(name) {
             Entry::Occupied(_) => todo!(),
             Entry::Vacant(vacant) => {
-                vacant.insert(ScopeItem {
-                    value: Some(Value::Local { index: self.builder.mark_local(), ty, span }),
-                    ty: None,
+                vacant.insert(Item::Local {
+                    index: self.builder.mark_local(),
+                    ty,
                     span
                 });
                 Ok(())
@@ -126,7 +96,7 @@ impl<'ctx, 'ast> FunctionTypeResolver<'ctx, 'ast> {
             }
             Stmt::Let(stmt) => {
                 let expected_ty = if let Some(ty) = &stmt.ty {
-                    Some(self.scopes.resolve_type(ty)?)
+                    Some(self.ctx.resolve_type(&self.scopes, ty)?)
                 } else {
                     None
                 };
@@ -171,11 +141,11 @@ impl<'ctx, 'ast> FunctionTypeResolver<'ctx, 'ast> {
                 self.builder.push_integer(number);
                 Type::U32
             }
-            Expr::Name((symbol, _)) => {
-                let value = self.scopes.resolve_as_value(symbol)?;
+            Expr::Name(name) => {
+                let value = self.ctx.resolve_name_as_value(&self.scopes, name)?;
                 match value {
                     Value::Local { index, ty, span: _ } => {
-                        self.builder.load_local(*index);
+                        self.builder.load_local(index);
                         ty.clone()
                     }
                 }
@@ -197,8 +167,8 @@ pub(crate) fn check_types(ctx: LoweringContext<AllFunctionSignatures>) -> Compil
                     let mut this = FunctionTypeResolver {
                         ctx: &ctx,
                         return_type: signature.return_type.clone(),
-                        scopes: Scopes(vec![]),
-                        builder: ex::FunctionBuilder::new(ctx.ast().sources.get_symbol(func_.name), vec![], ctx.lower_type(&signature.return_type)),
+                        scopes: Scopes { scopes: vec![] },
+                        builder: ex::FunctionBuilder::new(ctx.ast().sources.get_symbol(func_.name.symbol), vec![], ctx.lower_type(&signature.return_type)),
                     };
                     this.lower_block(&func_.body, Some(signature.return_type.clone()))?;
                     this.builder.return_();

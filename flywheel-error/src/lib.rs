@@ -6,6 +6,16 @@ use flywheel_sources::{LineInfo, SourceMap, Span};
 
 pub type CompileResult<T> = Result<T, CompileMessage>;
 
+pub trait CompileResultExt<T> {
+    fn with_span(self, span: Span) -> Self;
+}
+
+impl<T> CompileResultExt<T> for CompileResult<T> {
+    fn with_span(self, span: Span) -> Self {
+        self.map_err(move |msg| msg.with_span(span))
+    }
+}
+
 #[derive(Debug)]
 pub enum Level {
     Note,
@@ -57,6 +67,10 @@ struct Inner {
 impl CompileMessage {
     pub fn note(message: impl Into<String>) -> CompileMessage {
         CompileMessage::new(Level::Note, Message::Static(message.into()))
+    }
+
+    pub fn note_dyn(message: impl 'static + for<'a> Fn(&'a SourceMap) -> String + Send + Sync) -> CompileMessage {
+        CompileMessage::new(Level::Note, Message::Dynamic(Box::new(message)))
     }
 
     pub fn error(message: impl Into<String>) -> CompileMessage {

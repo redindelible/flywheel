@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use flywheel_ast as ast;
+use flywheel_exchange as ex;
 use flywheel_error::{CompileMessage, CompileResult};
 use flywheel_sources::{Span, Symbol};
+use crate::types::Type;
 
 pub enum Builtin {
     U32,
@@ -14,6 +15,7 @@ pub enum Item<'ast> {
     Function(&'ast ast::Function<'ast>),
     Struct(&'ast ast::Struct<'ast>),
     Builtin(Builtin),
+    Local { index: ex::LocalId, ty: Type<'ast>, span: Span }
 }
 
 impl<'ast> Item<'ast> {
@@ -23,12 +25,17 @@ impl<'ast> Item<'ast> {
             Item::Function(item) => Some(item.span),
             Item::Struct(item) => Some(item.span),
             Item::Builtin(_) => None,
+            Item::Local { span, ..} => Some(*span),
         }
     }
 }
 
+pub enum Value<'ast> {
+    Local { index: ex::LocalId, ty: Type<'ast>, span: Span }
+}
+
 pub struct Namespace<'ast> {
-    items: HashMap<Symbol, Item<'ast>>,
+    pub items: HashMap<Symbol, Item<'ast>>,
 }
 
 impl<'ast> Namespace<'ast> {
@@ -55,33 +62,21 @@ impl<'ast> Namespace<'ast> {
         Ok(())
     }
 
-    fn resolve(&self, name: Symbol) -> Option<&Item<'ast>> {
-        self.items.get(&name)
+    pub fn search<'a>(search: impl SearchPath<'a, 'ast>, name: ast::Name) -> CompileResult<&'a Item<'ast>> where 'ast: 'a {
+        for ns in search {
+            if let Some(item) = ns.items.get(&name.symbol) {
+                return Ok(item);
+            }
+        }
+        Err(CompileMessage::error_dyn(move |s| format!("Could not resolve `{}`", s.get_symbol(name.symbol))).with_span(name.span))
     }
 }
 
 
-pub struct SearchPath<'a, 'ast>(Vec<&'a [Namespace<'ast>]>);
+pub(crate) trait SearchPath<'a, 'ast: 'a>: IntoIterator<Item=&'a Namespace<'ast>> {
 
-impl<'a, 'ast> From<&'a Namespace<'ast>> for SearchPath<'a, 'ast> {
-    fn from(value: &'a Namespace<'ast>) -> SearchPath<'a, 'ast> {
-        SearchPath(vec![std::slice::from_ref(value)])
-    }
 }
 
-impl<'a, 'ast> From<&'a [Namespace<'ast>]> for SearchPath<'a, 'ast> {
-    fn from(value: &'a [Namespace<'ast>]) -> SearchPath<'a, 'ast> {
-        SearchPath(vec![value])
-    }
-}
+impl<'a, 'ast, T> SearchPath<'a, 'ast> for T where T: IntoIterator<Item=&'a Namespace<'ast>>, 'ast: 'a {
 
-impl<'a, 'ast> SearchPath<'a, 'ast> {
-    pub fn then(mut self, ns: &'a Namespace<'ast>) -> SearchPath<'a, 'ast> {
-        self.0.push(std::slice::from_ref(ns));
-        self
-    }
-
-    pub fn resolve(&self, name: Symbol) -> Option<&'a Item<'ast>> {
-        self.0.iter().copied().flatten().find_map(|ns| ns.resolve(name))
-    }
 }

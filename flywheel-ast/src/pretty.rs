@@ -65,6 +65,12 @@ impl<'a> Debug for Pretty<'a, &'a (Symbol, Span)> {
     }
 }
 
+impl<'a> Debug for Pretty<'a, &'a Name> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.sources.get_span(self.inner.span))
+    }
+}
+
 impl<'a> Debug for Pretty<'a, &'a Span> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let span_info = self.sources.get_span_info(*self.inner);
@@ -138,9 +144,15 @@ ast_pretty!(
 
 ast_pretty!(struct Function {
     name,
+    parameters,
     return_type,
     body,
     span,
+});
+
+ast_pretty!(struct Parameter {
+    name,
+    ty,
 });
 
 ast_pretty!(struct Import {
