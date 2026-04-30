@@ -101,6 +101,7 @@ impl<'ast, N, V> Index<&'ast N> for AstMap<'ast, N, V> {
 }
 
 pub struct FunctionSignature<'ast> {
+    pub parameters: Vec<Type<'ast>>,
     pub return_type: Type<'ast>,
     pub id: ex::FunctionId,
 }

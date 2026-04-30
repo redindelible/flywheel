@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use flywheel_ast as ast;
 use flywheel_exchange as ex;
 use flywheel_error::{CompileMessage, CompileResult, CompileResultExt};
+use flywheel_exchange::LocalId;
 use flywheel_sources::{Span, Symbol};
 
 use crate::context::{AllFunctionSignatures, LoweringContext};
@@ -164,12 +165,23 @@ pub(crate) fn check_types(ctx: LoweringContext<AllFunctionSignatures>) -> Compil
             match *top_level {
                 ast::TopLevel::Function(func_) => {
                     let signature = &ctx.all_function_signatures().signatures[func_];
+
+                    let lowered_arguments = signature.parameters.iter().map(|ty| ctx.lower_type(ty)).collect();
                     let mut this = FunctionTypeResolver {
                         ctx: &ctx,
                         return_type: signature.return_type.clone(),
-                        scopes: Scopes { scopes: vec![] },
-                        builder: ex::FunctionBuilder::new(ctx.ast().sources.get_symbol(func_.name.symbol), vec![], ctx.lower_type(&signature.return_type)),
+                        scopes: Scopes { scopes: vec![
+                            Namespace::new()
+                        ] },
+                        builder: ex::FunctionBuilder::new(ctx.ast().sources.get_symbol(func_.name.symbol), lowered_arguments, ctx.lower_type(&signature.return_type)),
                     };
+
+                    let scope = this.scopes.current_mut();
+
+                    for (i, (parameter, parameter_ty)) in func_.parameters.iter().zip(&signature.parameters).enumerate() {
+                        // todo find a much better way to deal with this
+                        scope.add(parameter.name.symbol, Item::Local { index: this.builder.get_parameter(i), ty: parameter_ty.clone(), span: parameter.name.span })?;
+                    }
                     this.lower_block(&func_.body, Some(signature.return_type.clone()))?;
                     this.builder.return_();
 

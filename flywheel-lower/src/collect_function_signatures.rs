@@ -17,8 +17,14 @@ pub(crate) fn collect_function_signatures(
         for top_level in file.top_levels() {
             match *top_level {
                 ast::TopLevel::Function(func_) => {
-                    let return_type = ctx.resolve_type([&ctx.collected_names().prelude_ns, file_namespace], &func_.return_type)?;
+                    let search = [&ctx.collected_names().prelude_ns, file_namespace];
+                    let mut parameters = vec![];
+                    for parameter in func_.parameters {
+                        parameters.push(ctx.resolve_type(search, &parameter.ty)?);
+                    }
+                    let return_type = ctx.resolve_type(search, &func_.return_type)?;
                     signatures.insert(func_, FunctionSignature {
+                        parameters,
                         return_type,
                         id: next_function_id.next().unwrap()
                     });

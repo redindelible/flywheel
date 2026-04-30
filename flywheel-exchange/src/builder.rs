@@ -156,6 +156,11 @@ impl FunctionBuilder {
         LocalId(self.builder.stack.len() as u32)
     }
 
+    pub fn get_parameter(&self, index: usize) -> LocalId {
+        assert!(self.builder.stack.len() > index);
+        LocalId(index as u32)
+    }
+
     fn add_successor(&mut self, target_id: BlockId) {
         let target = self.blocks.get_mut(&target_id).unwrap();
         target.add_predecessor(self.builder.id, &self.builder.stack);
